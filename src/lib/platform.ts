@@ -16,6 +16,8 @@ export type BusinessCategory = typeof businessCategoryIds[number];
 export type LocalizedText = { al: string; en: string };
 export type Service = {
   id: string;
+  businessId: string;
+  locationId: string;
   name: LocalizedText;
   description: LocalizedText;
   price: number;
@@ -41,13 +43,14 @@ export type Business = {
   imageUrl: string;
   schedule: WorkingDay[];
   closures: string[];
+  activeLocationIds: string[];
   services: Service[];
   featured: boolean;
   isPublished: boolean;
   isActive: boolean;
   createdAt: string;
 };
-export type AppointmentStatus = "confirmed" | "cancelled" | "completed";
+export type AppointmentStatus = "pending" | "confirmed" | "cancelled" | "completed";
 export type Appointment = {
   id: string;
   businessId: string;

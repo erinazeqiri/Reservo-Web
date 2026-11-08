@@ -82,6 +82,10 @@ button{transition:color .18s ease,background-color .18s ease,border-color .18s e
 @media(max-width:390px){.brand{font-size:19px}.brand-mark{width:31px;height:31px}.language-option{min-width:29px;padding-inline:6px}.hero h1{letter-spacing:-2.8px}.benefit-card{padding:21px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 
+html{scroll-behavior:auto}
+.business-profile,.booking-page,.account-page,.onboarding-page,.dashboard{scroll-margin-top:96px}
+@media(max-width:700px){.business-profile,.booking-page,.account-page,.onboarding-page,.dashboard{scroll-margin-top:82px}}
+
 .business-search-row{margin-top:30px}
 .category-select-label{display:none}
 .business-search-row .filters{gap:8px;margin:0 0 25px;overflow-x:auto;flex-wrap:nowrap;padding:3px 1px 9px;scrollbar-width:thin}
