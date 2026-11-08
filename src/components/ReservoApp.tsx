@@ -1,64 +1,147 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type CSSProperties } from "react";
 import { translations, type Language } from "@/lib/i18n";
+import {
+  businessCategoryIds,
+  defaultSchedule,
+  formatTime,
+  getAvailableSlots,
+  getLocalDateString,
+  makeId,
+  sampleAppointments,
+  sampleBusinesses,
+  weekdays,
+  type Appointment,
+  type Business,
+  type BusinessCategory,
+  type Service,
+  type WorkingDay,
+} from "@/lib/platform";
 
-type Category = "all" | "hair" | "beauty" | "wellness" | "skincare";
-type Service = { id: number; category: Exclude<Category, "all">; duration: number; price: number; rating: string; reviews: number; color: string };
-type Booking = { id: number; serviceId: number; customer: string; date: string; time: string; status: "confirmed" | "pending"; price: number };
-type View = "home" | "booking" | "dashboard";
+type View = "home" | "profile" | "booking" | "register" | "onboarding" | "dashboard";
+type BusinessFilter = BusinessCategory | "all";
+type DashboardTab = "overview" | "upcoming" | "history" | "services" | "hours" | "profile";
+type DraftService = { id: string; name: string; description: string; price: string; duration: string };
+type BusinessDraft = {
+  name: string;
+  category: BusinessCategory | "";
+  phone: string;
+  city: string;
+  address: string;
+  email: string;
+  description: string;
+  imageUrl: string;
+  schedule: WorkingDay[];
+  closures: string[];
+  services: DraftService[];
+};
 
-const services: Service[] = [
-  { id: 1, category: "hair", duration: 45, price: 28, rating: "4.9", reviews: 128, color: "lavender" },
-  { id: 2, category: "beauty", duration: 50, price: 24, rating: "4.8", reviews: 96, color: "peach" },
-  { id: 3, category: "wellness", duration: 60, price: 55, rating: "5.0", reviews: 74, color: "mint" },
-  { id: 4, category: "skincare", duration: 40, price: 42, rating: "4.9", reviews: 83, color: "blue" },
-];
-
-const initialBookings: Booking[] = [
-  { id: 1048, serviceId: 1, customer: "Mia Thompson", date: "today", time: "10:30 AM", status: "confirmed", price: 28 },
-  { id: 1049, serviceId: 2, customer: "Olivia Martin", date: "today", time: "12:00 PM", status: "pending", price: 24 },
-  { id: 1050, serviceId: 3, customer: "Noah Williams", date: "today", time: "2:15 PM", status: "confirmed", price: 55 },
-  { id: 1051, serviceId: 4, customer: "Ava Johnson", date: "tomorrow", time: "9:00 AM", status: "confirmed", price: 42 },
-];
-
-const times = ["9:00 AM", "10:30 AM", "12:00 PM", "1:30 PM", "2:15 PM", "4:00 PM"];
-const categories: Category[] = ["all", "hair", "beauty", "wellness", "skincare"];
 const serviceSymbols = ["✂", "✳", "☼", "❋"];
+const dashboardTabs: DashboardTab[] = ["overview", "upcoming", "history", "services", "hours", "profile"];
+
+function blankDraftService(): DraftService {
+  return { id: makeId("service"), name: "", description: "", price: "", duration: "" };
+}
+
+function blankBusinessDraft(): BusinessDraft {
+  return {
+    name: "",
+    category: "",
+    phone: "",
+    city: "",
+    address: "",
+    email: "",
+    description: "",
+    imageUrl: "",
+    schedule: defaultSchedule.map((day) => ({ ...day })),
+    closures: [],
+    services: [blankDraftService()],
+  };
+}
+
+function sameText(value: string) {
+  return { al: value, en: value };
+}
 
 function formatPrice(price: number, language: Language) {
   return language === "al" ? `${price} €` : `€${price}`;
 }
 
-function formatDate(date: string, language: Language) {
-  return new Intl.DateTimeFormat(language === "al" ? "sq-AL" : "en-US", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(`${date}T12:00:00`));
+function formatDate(
+  date: string,
+  language: Language,
+  options: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric" },
+) {
+  const parsed = new Date(`${date}T12:00:00Z`);
+  const day = parsed.getUTCDate();
+  const monthIndex = parsed.getUTCMonth();
+  const year = parsed.getUTCFullYear();
+  const fullMonths = language === "al"
+    ? ["janar", "shkurt", "mars", "prill", "maj", "qershor", "korrik", "gusht", "shtator", "tetor", "nëntor", "dhjetor"]
+    : ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const shortMonths = language === "al"
+    ? ["jan", "shk", "mar", "pri", "maj", "qer", "kor", "gus", "sht", "tet", "nën", "dhj"]
+    : ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const month = options.month === "long" ? fullMonths[monthIndex] : shortMonths[monthIndex];
+  if (!options.month) return String(day);
+  if (!options.year) return `${month} ${day}`;
+  return language === "al" ? `${day}. ${fullMonths[monthIndex]} ${year}` : `${month} ${day}, ${year}`;
+}
+
+function formatService(service: Service, language: Language) {
+  return {
+    name: service.name[language],
+    description: service.description[language],
+    duration: `${service.durationMinutes} min`,
+  };
+}
+
+function safeImageStyle(imageUrl: string): CSSProperties {
+  return imageUrl ? { backgroundImage: `url("${imageUrl.replace(/["\\\n\r]/g, "")}")` } : {};
 }
 
 export default function ReservoApp() {
   const [language, setLanguage] = useState<Language>("al");
   const [languageReady, setLanguageReady] = useState(false);
   const [view, setView] = useState<View>("home");
-  const [category, setCategory] = useState<Category>("all");
-  const [selectedId, setSelectedId] = useState(services[0].id);
-  const [date, setDate] = useState("2026-11-10");
-  const [time, setTime] = useState(times[1]);
-  const [customer, setCustomer] = useState("");
-  const [email, setEmail] = useState("");
-  const [bookings, setBookings] = useState<Booking[]>(initialBookings);
-  const [confirmed, setConfirmed] = useState(false);
-  const [mobileMenu, setMobileMenu] = useState(false);
+  const [businesses, setBusinesses] = useState<Business[]>(sampleBusinesses);
+  const [appointments, setAppointments] = useState<Appointment[]>(sampleAppointments);
+  const [activeBusinessId, setActiveBusinessId] = useState<string | null>(null);
+  const [selectedBusinessId, setSelectedBusinessId] = useState<string | null>(null);
+  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
+  const [businessFilter, setBusinessFilter] = useState<BusinessFilter>("all");
   const [search, setSearch] = useState("");
+  const [bookingDate, setBookingDate] = useState(getLocalDateString());
+  const [bookingTime, setBookingTime] = useState("");
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
   const [formError, setFormError] = useState("");
-  const [sectionToScroll, setSectionToScroll] = useState<string | null>(null);
+  const [bookingConfirmed, setBookingConfirmed] = useState(false);
+  const [confirmedAppointment, setConfirmedAppointment] = useState<Appointment | null>(null);
+  const [mobileMenu, setMobileMenu] = useState(false);
+  const [registrationEmail, setRegistrationEmail] = useState("");
+  const [registrationPassword, setRegistrationPassword] = useState("");
+  const [registrationPasswordConfirm, setRegistrationPasswordConfirm] = useState("");
+  const [onboardingStep, setOnboardingStep] = useState(0);
+  const [draft, setDraft] = useState<BusinessDraft>(blankBusinessDraft);
+  const [draftError, setDraftError] = useState("");
+  const [newClosureDate, setNewClosureDate] = useState("");
+  const [dashboardTab, setDashboardTab] = useState<DashboardTab>("overview");
+  const [serviceEditor, setServiceEditor] = useState<DraftService | null>(null);
+  const [dashboardDraft, setDashboardDraft] = useState<Business | null>(null);
+  const [dashboardMessage, setDashboardMessage] = useState("");
   const languageInitialized = useRef(false);
 
   const t = translations[language];
-  const selected = services.find((service) => service.id === selectedId) ?? services[0];
-  const selectedCopy = t.services[selected.id - 1];
+  const selectedBusiness = businesses.find((business) => business.id === selectedBusinessId);
+  const currentBusiness = businesses.find((business) => business.id === activeBusinessId);
+  const selectedService = selectedBusiness?.services.find((service) => service.id === selectedServiceId);
+  const today = getLocalDateString();
+  const availableSlots = useMemo(() => selectedBusiness && selectedService
+    ? getAvailableSlots(selectedBusiness, selectedService, bookingDate, appointments)
+    : [], [selectedBusiness, selectedService, bookingDate, appointments]);
 
   useEffect(() => {
     if (!languageInitialized.current) {
@@ -78,33 +161,47 @@ export default function ReservoApp() {
   }, [language, languageReady, t]);
 
   useEffect(() => {
-    if (!sectionToScroll) return;
-    document.getElementById(sectionToScroll)?.scrollIntoView({ behavior: "smooth" });
-    setSectionToScroll(null);
-  }, [sectionToScroll, view]);
+    if (bookingConfirmed) return;
+    if (availableSlots.length > 0 && !availableSlots.includes(bookingTime)) setBookingTime(availableSlots[0]);
+    if (availableSlots.length === 0) setBookingTime("");
+  }, [availableSlots, bookingConfirmed, bookingTime]);
 
-  const filtered = useMemo(() => services.filter((service, index) => {
-    const copy = translations[language].services[index];
-    const matchesCategory = category === "all" || service.category === category;
-    const searchText = `${copy.name} ${copy.description} ${translations[language].categories[service.category]}`.toLocaleLowerCase(language === "al" ? "sq-AL" : "en-US");
-    return matchesCategory && searchText.includes(search.toLocaleLowerCase(language === "al" ? "sq-AL" : "en-US"));
-  }), [category, language, search]);
+  const publicBusinesses = useMemo(() => businesses.filter(
+    (business) => business.isActive && business.isPublished,
+  ), [businesses]);
+  const matchingBusinesses = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase(language === "al" ? "sq-AL" : "en-US");
+    return publicBusinesses.filter((business) => {
+      const categoryMatches = businessFilter === "all" || business.category === businessFilter;
+      const serviceNames = business.services.flatMap((service) => [service.name.al, service.name.en]).join(" ");
+      const searchable = [
+        business.name.al,
+        business.name.en,
+        business.description.al,
+        business.description.en,
+        business.city,
+        business.address,
+        serviceNames,
+        t.businessCategories[business.category],
+      ].join(" ").toLocaleLowerCase(language === "al" ? "sq-AL" : "en-US");
+      return categoryMatches && searchable.includes(query);
+    });
+  }, [businessFilter, language, publicBusinesses, search, t.businessCategories]);
+  const recentlyAdded = [...matchingBusinesses.filter((business) => !business.featured)]
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const featuredBusinesses = matchingBusinesses.filter((business) => business.featured).slice(0, 3);
 
   function navigate(nextView: View) {
-    setView(nextView);
+    if (nextView === "dashboard" && !activeBusinessId) {
+      setView("register");
+    } else {
+      setView(nextView);
+    }
     setMobileMenu(false);
     setFormError("");
+    setDraftError("");
+    setDashboardMessage("");
     window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function navigateToSection(sectionId: string) {
-    setMobileMenu(false);
-    if (view === "home") {
-      document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth" });
-      return;
-    }
-    setSectionToScroll(sectionId);
-    setView("home");
   }
 
   function chooseLanguage(option: Language) {
@@ -113,53 +210,297 @@ export default function ReservoApp() {
     setLanguage(option);
   }
 
-  function startBooking(service: Service) {
-    setSelectedId(service.id);
-    setConfirmed(false);
-    navigate("booking");
+  function openBusiness(business: Business) {
+    setSelectedBusinessId(business.id);
+    setView("profile");
+    setMobileMenu(false);
+    setFormError("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function startBooking(business: Business, service: Service) {
+    if (!business.isActive || !business.isPublished || !service.active) {
+      setFormError(t.booking.noBusiness);
+      return;
+    }
+    setSelectedBusinessId(business.id);
+    setSelectedServiceId(service.id);
+    setBookingDate(today);
+    setBookingTime("");
+    setCustomerName("");
+    setCustomerPhone("");
+    setCustomerEmail("");
+    setBookingConfirmed(false);
+    setConfirmedAppointment(null);
+    setFormError("");
+    setView("booking");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function confirmBooking(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!customer.trim() || !email.trim()) {
+    if (!selectedBusiness || !selectedService || !selectedBusiness.isPublished || !selectedBusiness.isActive) {
+      setFormError(t.booking.noBusiness);
+      return;
+    }
+    if (!customerName.trim() || customerPhone.replace(/\D/g, "").length < 7 || !bookingTime) {
+      setFormError(t.booking.phoneError);
+      return;
+    }
+    if (customerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
       setFormError(t.booking.formError);
       return;
     }
-    setBookings((previous) => [{
-      id: 1052 + previous.length,
-      serviceId: selected.id,
-      customer: customer.trim(),
-      date,
-      time,
+    if (!getAvailableSlots(selectedBusiness, selectedService, bookingDate, appointments).includes(bookingTime)) {
+      setFormError(t.booking.unavailable);
+      return;
+    }
+    const appointment: Appointment = {
+      id: makeId("appointment"),
+      businessId: selectedBusiness.id,
+      serviceId: selectedService.id,
+      serviceName: selectedService.name.en,
+      durationMinutes: selectedService.durationMinutes,
+      customerName: customerName.trim(),
+      customerPhone: customerPhone.trim(),
+      customerEmail: customerEmail.trim(),
+      date: bookingDate,
+      time: bookingTime,
+      price: selectedService.price,
       status: "confirmed",
-      price: selected.price,
-    }, ...previous]);
+    };
+    setAppointments((previous) => [...previous, appointment]);
+    setConfirmedAppointment(appointment);
+    setBookingConfirmed(true);
     setFormError("");
-    setConfirmed(true);
   }
+
+  function registerBusiness(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (registrationPassword.length < 8) {
+      setFormError(t.registration.passwordTooShort);
+      return;
+    }
+    if (registrationPassword !== registrationPasswordConfirm) {
+      setFormError(t.registration.passwordMismatch);
+      return;
+    }
+    setDraft(blankBusinessDraft());
+    setOnboardingStep(0);
+    setView("onboarding");
+    setFormError("");
+  }
+
+  function setDraftField<K extends keyof BusinessDraft>(key: K, value: BusinessDraft[K]) {
+    setDraft((previous) => ({ ...previous, [key]: value }));
+  }
+
+  function setDraftSchedule(weekday: number, change: Partial<WorkingDay>) {
+    setDraft((previous) => ({
+      ...previous,
+      schedule: previous.schedule.map((day) => day.weekday === weekday ? { ...day, ...change } : day),
+    }));
+  }
+
+  function updateDraftService(id: string, change: Partial<DraftService>) {
+    setDraft((previous) => ({
+      ...previous,
+      services: previous.services.map((service) => service.id === id ? { ...service, ...change } : service),
+    }));
+  }
+
+  function updateDashboardBusiness(change: Partial<Business>) {
+    setDashboardDraft((previous) => previous ? { ...previous, ...change } : previous);
+  }
+
+  function saveDashboardProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!dashboardDraft || !activeBusinessId) return;
+    setBusinesses((previous) => previous.map((business) => business.id === activeBusinessId ? dashboardDraft : business));
+    setDashboardMessage(t.dashboard.saved);
+  }
+
+  function saveDashboardHours(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!dashboardDraft || !activeBusinessId) return;
+    setBusinesses((previous) => previous.map((business) => business.id === activeBusinessId ? dashboardDraft : business));
+    setDashboardMessage(t.dashboard.saved);
+  }
+
+  function changeAppointmentStatus(appointmentId: string, status: Appointment["status"]) {
+    setAppointments((previous) => previous.map((appointment) => appointment.id === appointmentId ? { ...appointment, status } : appointment));
+  }
+
+  function saveDashboardService(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!serviceEditor || !activeBusinessId || !serviceEditor.name.trim()) return;
+    const price = Number(serviceEditor.price);
+    const durationMinutes = Number(serviceEditor.duration);
+    if (!Number.isFinite(price) || price < 0 || !Number.isInteger(durationMinutes) || durationMinutes < 1) return;
+    const service: Service = {
+      id: serviceEditor.id,
+      name: sameText(serviceEditor.name.trim()),
+      description: sameText(serviceEditor.description.trim()),
+      price,
+      durationMinutes,
+      active: true,
+    };
+    setBusinesses((previous) => previous.map((business) => business.id === activeBusinessId
+      ? { ...business, services: [...business.services.filter((item) => item.id !== service.id), service] }
+      : business));
+    setServiceEditor(null);
+    setDashboardMessage(t.dashboard.saved);
+  }
+
+  function publishOnboarding() {
+    if (!draft.category || draft.services.some((service) => !service.name.trim() || !service.duration || Number(service.duration) < 1 || Number(service.price) < 0)) {
+      setDraftError(t.onboarding.serviceRequired);
+      setOnboardingStep(2);
+      return;
+    }
+    const business: Business = {
+      id: makeId("business"),
+      ownerEmail: registrationEmail.trim().toLowerCase(),
+      name: sameText(draft.name.trim()),
+      category: draft.category,
+      phone: draft.phone.trim(),
+      city: draft.city.trim(),
+      address: draft.address.trim() || draft.city.trim(),
+      email: draft.email.trim(),
+      description: sameText(draft.description.trim()),
+      imageUrl: draft.imageUrl.trim(),
+      schedule: draft.schedule.map((day) => ({ ...day })),
+      closures: [...draft.closures],
+      services: draft.services.map((service) => ({
+        id: service.id,
+        name: sameText(service.name.trim()),
+        description: sameText(service.description.trim()),
+        price: Number(service.price),
+        durationMinutes: Number(service.duration),
+        active: true,
+      })),
+      featured: false,
+      isPublished: true,
+      isActive: true,
+      createdAt: new Date().toISOString(),
+    };
+    setBusinesses((previous) => [...previous, business]);
+    setActiveBusinessId(business.id);
+    setSelectedBusinessId(business.id);
+    setDashboardDraft(business);
+    setDashboardTab("overview");
+    setDashboardMessage(t.onboarding.published);
+    setRegistrationPassword("");
+    setRegistrationPasswordConfirm("");
+    setOnboardingStep(4);
+    setView("onboarding");
+    setDraftError("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function endDemoSession() {
+    setActiveBusinessId(null);
+    setDashboardDraft(null);
+    setDashboardTab("overview");
+    setView("home");
+    setRegistrationEmail("");
+    setRegistrationPassword("");
+    setRegistrationPasswordConfirm("");
+  }
+
+  function serviceEditorField(field: keyof DraftService, value: string) {
+    setServiceEditor((previous) => previous ? { ...previous, [field]: value } : previous);
+  }
+
+  function renderBusinessCard(business: Business, index: number, isNew = false) {
+    const name = business.name[language];
+    const description = business.description[language] || t.profile.noDescription;
+    const category = t.businessCategories[business.category];
+    return (
+      <article className="business-card" key={business.id}>
+        <button className={`business-card-image business-image-${index % 4}`} style={safeImageStyle(business.imageUrl)} onClick={() => openBusiness(business)} aria-label={`${t.home.viewProfile}: ${name}`}>
+          {!business.imageUrl && <span className="business-initials">{name.trim().slice(0, 2).toLocaleUpperCase()}</span>}
+          <span className="business-card-tag">{isNew ? t.home.newBusiness : t.home.featured}</span>
+        </button>
+        <div className="business-card-content">
+          <div className="business-card-heading"><div><span className="business-category">{category}</span><h3>{name}</h3></div><span className="business-service-count">{business.services.filter((service) => service.active).length} {t.home.serviceCount}</span></div>
+          <p>{description}</p>
+          <div className="business-card-location">⌖ {business.city || business.address}</div>
+          <button className="business-view-link" onClick={() => openBusiness(business)}>{t.home.viewProfile}<span>→</span></button>
+        </div>
+      </article>
+    );
+  }
+
+  function renderHours(schedule: WorkingDay[], onChange: (weekday: number, change: Partial<WorkingDay>) => void, editable: boolean) {
+    return (
+      <div className="hours-list">
+        {weekdays.map((day, weekday) => {
+          const hours = schedule.find((item) => item.weekday === weekday) ?? { weekday, isClosed: true, opensAt: "09:00", closesAt: "17:00" };
+          return (
+            <div className="hours-row" key={weekday}>
+              <span className="hours-day">{day[language]}</span>
+              {editable ? <label className="hours-open-toggle"><input type="checkbox" checked={!hours.isClosed} onChange={(event) => onChange(weekday, { isClosed: !event.target.checked })} /><span>{hours.isClosed ? t.onboarding.closed : t.onboarding.open}</span></label>
+                : <span className={hours.isClosed ? "hours-status closed" : "hours-status"}>{hours.isClosed ? t.profile.closed : `${hours.opensAt} – ${hours.closesAt}`}</span>}
+              {editable && !hours.isClosed && <>
+                <label className="hours-time">{t.onboarding.opensAt}<input type="time" value={hours.opensAt} onChange={(event) => onChange(weekday, { opensAt: event.target.value })} required /></label>
+                <label className="hours-time">{t.onboarding.closesAt}<input type="time" value={hours.closesAt} min={hours.opensAt} onChange={(event) => onChange(weekday, { closesAt: event.target.value })} required /></label>
+              </>}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function renderAppointments(items: Appointment[], showActions: boolean) {
+    if (items.length === 0) return <div className="dashboard-empty">{t.dashboard.noAppointments}</div>;
+    return (
+      <div className="appointments-list">
+        {items.map((appointment) => {
+          const service = currentBusiness?.services.find((item) => item.id === appointment.serviceId);
+          const statusLabel = appointment.status === "completed" ? t.dashboard.statusCompleted : appointment.status === "cancelled" ? t.dashboard.statusCancelled : t.booking.confirmed;
+          return (
+            <article className="appointment-item" key={appointment.id}>
+              <div className="appointment-date-block"><b>{formatDate(appointment.date, language, { day: "numeric" })}</b><span>{formatDate(appointment.date, language, { month: "short" })}</span></div>
+              <div className="appointment-main"><b>{appointment.customerName}</b><span>{service?.name[language] ?? appointment.serviceName} · {formatTime(appointment.time, language)}</span><small>{appointment.customerPhone}{appointment.customerEmail ? ` · ${appointment.customerEmail}` : ""}</small></div>
+              <span className={`status ${appointment.status === "confirmed" ? "confirmed-status" : appointment.status === "completed" ? "completed-status" : "pending-status"}`}>{statusLabel}</span>
+              {showActions && appointment.status === "confirmed" && <div className="appointment-actions"><button type="button" onClick={() => changeAppointmentStatus(appointment.id, "completed")}>{t.dashboard.statusCompleted}</button><button type="button" onClick={() => changeAppointmentStatus(appointment.id, "cancelled")}>{t.dashboard.statusCancelled}</button></div>}
+            </article>
+          );
+        })}
+      </div>
+    );
+  }
+
+  const dashboardTabLabels: Record<DashboardTab, string> = {
+    overview: t.dashboard.overview,
+    upcoming: t.dashboard.upcoming,
+    history: t.dashboard.history,
+    services: t.dashboard.servicesTab,
+    hours: t.dashboard.hoursTab,
+    profile: t.dashboard.profileTab,
+  };
 
   return (
     <main>
+      <div className="demo-banner"><span>!</span><b>{t.demo.title}</b><span>{t.demo.description}</span></div>
       <header className="topbar">
-        <button className="brand" onClick={() => navigate("home")} aria-label={t.nav.home}>
-          <span className="brand-mark">r</span>
-          <span>re<span className="brand-blue">servo</span></span>
-        </button>
+        <button className="brand" onClick={() => navigate("home")} aria-label={t.nav.home}><span className="brand-mark">r</span><span>re<span className="brand-blue">servo</span></span></button>
         <nav className={mobileMenu ? "nav nav-open" : "nav"} aria-label={t.nav.primaryNavigation}>
-          <button className={view === "home" ? "nav-link active" : "nav-link"} onClick={() => navigate("home")}>{t.nav.explore}</button>
-          <button className={view === "dashboard" ? "nav-link active" : "nav-link"} onClick={() => navigate("dashboard")}>{t.nav.forBusinesses}</button>
-          <button className="nav-link" onClick={() => navigateToSection("how")}>{t.nav.howItWorks}</button>
+          <button className={view === "home" || view === "profile" ? "nav-link active" : "nav-link"} onClick={() => navigate("home")}>{t.nav.explore}</button>
+          <button className={view === "dashboard" || view === "onboarding" ? "nav-link active" : "nav-link"} onClick={() => navigate("dashboard")}>{t.nav.forBusinesses}</button>
+          <button className="nav-link" onClick={() => {
+            setMobileMenu(false);
+            if (view === "home") document.getElementById("how")?.scrollIntoView({ behavior: "smooth" });
+            else navigate("home");
+          }}>{t.nav.howItWorks}</button>
         </nav>
         <div className="language-switcher" role="group" aria-label={t.nav.chooseLanguage}>
-          {(["al", "en"] as const).map((option) => (
-            <button key={option} type="button" className={language === option ? "language-option selected" : "language-option"} onClick={() => chooseLanguage(option)} aria-pressed={language === option}>
-              {option.toUpperCase()}
-            </button>
-          ))}
+          {(["al", "en"] as const).map((option) => <button key={option} type="button" className={language === option ? "language-option selected" : "language-option"} onClick={() => chooseLanguage(option)} aria-pressed={language === option}>{option.toUpperCase()}</button>)}
         </div>
         <div className="top-actions">
-          <button className="text-button" onClick={() => navigate("dashboard")}>{t.nav.signIn}</button>
-          <button className="primary small" onClick={() => navigate("dashboard")}>{t.nav.businessPortal}<span>↗</span></button>
+          {activeBusinessId ? <button className="text-button" onClick={() => navigate("dashboard")}>{t.nav.businessPortal}</button> : <button className="primary small" onClick={() => navigate("register")}>{t.nav.registerBusiness}<span>↗</span></button>}
         </div>
         <button className="menu-toggle" onClick={() => setMobileMenu(!mobileMenu)} aria-label={t.nav.toggleMenu} aria-expanded={mobileMenu}>☰</button>
       </header>
@@ -172,26 +513,18 @@ export default function ReservoApp() {
             <p className="hero-sub">{t.hero.description}</p>
             <div className="hero-search">
               <span className="search-icon" aria-hidden="true">⌕</span>
-              <input aria-label={t.hero.searchPlaceholder} value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t.hero.searchPlaceholder} />
-              <button onClick={() => navigateToSection("discover")}>{t.hero.searchButton}<span>→</span></button>
+              <input aria-label={t.home.businessSearchPlaceholder} value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t.home.businessSearchPlaceholder} />
+              <button onClick={() => document.getElementById("discover")?.scrollIntoView({ behavior: "smooth" })}>{t.hero.searchButton}<span>→</span></button>
             </div>
-            <div className="trust-row">
-              <div className="avatar-stack" aria-hidden="true"><i>J</i><i>M</i><i>A</i><i>+</i></div>
-              <span><b>1,200+</b> {t.hero.socialProof}</span>
-            </div>
+            <div className="trust-row"><div className="avatar-stack" aria-hidden="true"><i>J</i><i>M</i><i>A</i><i>+</i></div><span><b>{publicBusinesses.length}</b> {t.home.businessCount}</span></div>
           </div>
           <div className="hero-art" aria-label={t.hero.illustrationLabel}>
-            <div className="art-glow" />
-            <div className="art-card main-art">
+            <div className="art-glow" /><div className="art-card main-art">
               <div className="art-top"><span className="art-pill">{t.hero.appointmentPreview}</span><span className="dots">•••</span></div>
               <div className="art-date"><span>{t.hero.previewWeekday}</span><b>10</b><span>{t.hero.previewMonth}</span></div>
               <div className="art-rule" />
-              <div className="art-service">
-                <div className="service-avatar">✂</div>
-                <div><b>{t.services[0].name}</b><small>{t.hero.previewBusiness} · {t.services[0].duration}</small></div>
-                <span className="check">✓</span>
-              </div>
-              <div className="art-bottom"><span>10:30 AM</span><b>{t.booking.confirmed}</b></div>
+              <div className="art-service"><div className="service-avatar">✂</div><div><b>{t.services[0].name}</b><small>{t.hero.previewBusiness} · {t.services[0].duration}</small></div><span className="check">✓</span></div>
+              <div className="art-bottom"><span>10:30</span><b>{t.booking.confirmed}</b></div>
             </div>
             <div className="floating-note"><span className="note-icon">✦</span><div><b>{t.hero.allSet}</b><small>{t.hero.bookingConfirmed}</small></div></div>
             <div className="floating-stats"><span className="stats-icon">↗</span><div><b>{t.hero.easyBooking}</b><small>{t.hero.fewClicks}</small></div></div>
@@ -199,43 +532,22 @@ export default function ReservoApp() {
           </div>
         </section>
 
-        <section className="metrics" aria-label={t.home.stepsHeading}>
-          {t.home.steps.map((step, index) => <div key={step}><b>0{index + 1}</b><span>{step}</span></div>)}
-          <div className="metric-note">{t.home.metricNote}</div>
-        </section>
+        <section className="metrics"><div><b>01</b><span>{t.home.steps[0]}</span></div><div><b>02</b><span>{t.home.steps[1]}</span></div><div><b>03</b><span>{t.home.steps[2]}</span></div><div className="metric-note">{t.home.metricNote}</div></section>
 
         <section className="discover section" id="discover">
-          <div className="section-head">
-            <div><div className="eyebrow">{t.home.discoverEyebrow}</div><h2>{t.home.discoverTitle} <em>{t.home.discoverTitleEmphasis}</em>.</h2><p>{t.home.discoverDescription}</p></div>
-            <button className="view-all" onClick={() => { setCategory("all"); setSearch(""); }}>{t.home.viewAll}<span>↗</span></button>
+          <div className="section-head"><div><div className="eyebrow">{t.home.businessesEyebrow}</div><h2>{t.home.businessesTitle}<br /><em>{t.home.businessesTitleEmphasis}</em></h2><p>{t.home.businessesDescription}</p></div><button className="view-all" onClick={() => { setBusinessFilter("all"); setSearch(""); }}>{t.home.viewAll}<span>↗</span></button></div>
+          <div className="business-search-row"><label className="category-select-label">{t.home.categoriesHeading}<select value={businessFilter} onChange={(event) => setBusinessFilter(event.target.value as BusinessFilter)}><option value="all">{t.categories.all}</option>{businessCategoryIds.map((category) => <option key={category} value={category}>{t.businessCategories[category]}</option>)}</select></label>
+            <div className="filters" role="group" aria-label={t.home.categoriesHeading}><button className={businessFilter === "all" ? "filter selected" : "filter"} onClick={() => setBusinessFilter("all")}>{t.categories.all}</button>{businessCategoryIds.map((category) => <button key={category} className={businessFilter === category ? "filter selected" : "filter"} onClick={() => setBusinessFilter(category)} aria-pressed={businessFilter === category}>{t.businessCategories[category]}</button>)}</div>
           </div>
-          <div className="filters" role="group" aria-label={t.home.categoriesHeading}>
-            {categories.map((item) => <button key={item} className={category === item ? "filter selected" : "filter"} onClick={() => setCategory(item)} aria-pressed={category === item}>{t.categories[item]}</button>)}
-          </div>
-          <div className="service-grid">
-            {filtered.map((service) => {
-              const copy = t.services[service.id - 1];
-              return <article className="service-card" key={service.id}>
-                <div className={`service-visual ${service.color}`}>
-                  <span className="visual-number">0{service.id}</span><span className="visual-symbol">{serviceSymbols[service.id - 1]}</span><span className="visual-category">{t.categories[service.category]}</span>
-                </div>
-                <div className="service-info">
-                  <div className="service-title-row"><h3>{copy.name}</h3><span className="rating">★ {service.rating}</span></div>
-                  <p>{copy.description}</p>
-                  <div className="service-meta"><span>◷ {copy.duration}</span><b>{formatPrice(service.price, language)}</b></div>
-                  <button className="book-link" onClick={() => startBooking(service)}>{t.home.bookAppointment}<span>→</span></button>
-                </div>
-              </article>;
-            })}
-          </div>
-          {filtered.length === 0 && <div className="empty">{t.home.noServices}</div>}
+          {matchingBusinesses.length === 0 ? <div className="empty business-empty"><span className="empty-icon">⌕</span><h3>{t.home.noBusinesses}</h3><p>{businessFilter === "all" ? t.home.registerPrompt : t.home.noCategoryBusinesses}</p>{businessFilter !== "all" && <button className="view-all" onClick={() => setBusinessFilter("all")}>{t.home.viewAll}</button>}</div> : <>
+            {featuredBusinesses.length > 0 && <><div className="business-section-heading"><div><div className="eyebrow">{t.home.featured}</div><h3>{t.home.featuredBusinesses}</h3></div><span>{featuredBusinesses.length} {t.home.businessCount}</span></div><div className="business-grid">{featuredBusinesses.map((business, index) => renderBusinessCard(business, index))}</div></>}
+            {recentlyAdded.length > 0 && <><div className="business-section-heading recent-heading"><div><div className="eyebrow">{t.home.newBusiness}</div><h3>{t.home.recentlyAdded}</h3></div><span>{recentlyAdded.length} {t.home.businessCount}</span></div><div className="business-grid">{recentlyAdded.slice(0, 4).map((business, index) => renderBusinessCard(business, index, true))}</div></>}
+          </>}
         </section>
 
         <section className="how section" id="how">
           <div className="how-intro"><div className="eyebrow">{t.home.howEyebrow}</div><h2>{t.home.howTitle}<br /><em>{t.home.howTitleEmphasis}</em></h2><p>{t.home.howDescription}</p></div>
-          <div className="how-steps">
-            {t.home.howSteps.map((step, index) => <div key={step.title}><span>0{index + 1}</span><div><h3>{step.title}</h3><p>{step.description}</p></div><b>↗</b></div>)}
-          </div>
+          <div className="how-steps">{t.home.howSteps.map((step, index) => <div key={step.title}><span>0{index + 1}</span><div><h3>{step.title}</h3><p>{step.description}</p></div><b>↗</b></div>)}</div>
         </section>
 
         <section className="benefits section">
@@ -247,100 +559,99 @@ export default function ReservoApp() {
         </section>
 
         <section className="business-cta">
-          <div>
-            <div className="eyebrow light">{t.home.businessCtaEyebrow}</div>
-            <h2>{t.home.businessCtaTitle}<br /><em>{t.home.businessCtaTitleEmphasis}</em></h2>
-            <p>{t.home.businessCtaDescription}</p>
-            <button className="light-button" onClick={() => navigate("dashboard")}>{t.home.businessCtaButton}<span>→</span></button>
+          <div><div className="eyebrow light">{t.home.businessCtaEyebrow}</div><h2>{t.home.businessCtaTitle}<br /><em>{t.home.businessCtaTitleEmphasis}</em></h2><p>{t.home.businessCtaDescription}</p><button className="light-button" onClick={() => navigate("register")}>{t.nav.registerBusiness}<span>→</span></button></div>
+          <div className="cta-decoration"><div className="cta-ring" /><div className="mini-dashboard"><div className="mini-head"><span>{t.home.weekPreview}</span><b>↗</b></div><strong>24 <small>{t.home.appointments}</small></strong><div className="mini-bars">{[1, 2, 3, 4, 5, 6, 7].map((day) => <i key={day} />)}</div><div className="mini-foot">{t.home.weekdays.map((day) => <span key={day}>{day}</span>)}</div></div></div>
+        </section>
+      </>}
+
+      {view === "profile" && selectedBusiness && <>
+        <section className="business-profile section">
+          <button className="back-link" onClick={() => navigate("home")}>← {t.profile.back}</button>
+          <div className="profile-hero">
+            <div className="profile-cover" style={safeImageStyle(selectedBusiness.imageUrl)}>{!selectedBusiness.imageUrl && <span>{selectedBusiness.name[language].slice(0, 1)}</span>}</div>
+            <div className="profile-intro"><span className="business-category">{t.businessCategories[selectedBusiness.category]}</span><h1>{selectedBusiness.name[language]}</h1><p>{selectedBusiness.description[language] || t.profile.noDescription}</p><div className="profile-location">⌖ {selectedBusiness.city}{selectedBusiness.address && selectedBusiness.address !== selectedBusiness.city ? ` · ${selectedBusiness.address}` : ""}</div></div>
           </div>
-          <div className="cta-decoration"><div className="cta-ring" /><div className="mini-dashboard">
-            <div className="mini-head"><span>{t.home.weekPreview}</span><b>↗</b></div>
-            <strong>24 <small>{t.home.appointments}</small></strong>
-            <div className="mini-bars">{[1, 2, 3, 4, 5, 6, 7].map((day) => <i key={day} />)}</div>
-            <div className="mini-foot">{t.home.weekdays.map((day) => <span key={day}>{day}</span>)}</div>
-          </div></div>
+          <div className="profile-layout"><div className="profile-services">
+            <div className="business-section-heading"><div><div className="eyebrow">{t.profile.services}</div><h2>{t.profile.services}</h2></div></div>
+            {selectedBusiness.services.filter((service) => service.active).length === 0 ? <div className="empty">{t.profile.noServices}</div> : selectedBusiness.services.filter((service) => service.active).map((service, index) => {
+              const copy = formatService(service, language);
+              return <article className="profile-service-card" key={service.id}><div className={`profile-service-icon service-visual-${index % 4}`}>{serviceSymbols[index % serviceSymbols.length]}</div><div className="profile-service-copy"><h3>{copy.name}</h3><p>{copy.description || t.profile.noDescription}</p><span>◷ {copy.duration}</span></div><div className="profile-service-action"><strong>{formatPrice(service.price, language)}</strong><button className="primary small" onClick={() => startBooking(selectedBusiness, service)}>{t.profile.bookService}<span>→</span></button></div></article>;
+            })}
+          </div><aside className="profile-sidebar"><div className="profile-info-card"><div className="eyebrow">{t.profile.hours}</div>{renderHours(selectedBusiness.schedule, () => {}, false)}{selectedBusiness.closures.length > 0 && <p className="profile-closures">{t.onboarding.closures}: {selectedBusiness.closures.map((day) => formatDate(day, language)).join(", ")}</p>}</div><div className="profile-info-card"><div className="eyebrow">{t.profile.contact}</div><a href={`tel:${selectedBusiness.phone}`}>{selectedBusiness.phone}</a>{selectedBusiness.email && <a href={`mailto:${selectedBusiness.email}`}>{selectedBusiness.email}</a>}<p>{selectedBusiness.address || t.profile.noAddress}</p></div></aside></div>
         </section>
       </>}
 
       {view === "booking" && <section className="booking-page section">
-        <button className="back-link" onClick={() => navigate("home")}>← {t.booking.back}</button>
-        {confirmed ? <div className="success-card">
+        <button className="back-link" onClick={() => selectedBusiness ? openBusiness(selectedBusiness) : navigate("home")}>← {t.booking.back}</button>
+        {bookingConfirmed && selectedBusiness && selectedService ? <div className="success-card">
           <div className="success-mark">✓</div><div className="eyebrow">{t.booking.successEyebrow}</div><h1>{t.booking.successTitle}<br /><em>{t.booking.successTitleEmphasis}</em></h1>
           <p>{t.booking.successDescription}</p>
-          <div className="confirmation-details"><b>{selectedCopy.name}</b><span>{formatDate(date, language)} · {time}</span><span>{customer} · {email}</span><strong>{formatPrice(selected.price, language)}</strong></div>
+          <div className="confirmation-details"><b>{selectedBusiness.name[language]}</b><span>{formatService(selectedService, language).name}</span><span>{formatDate(confirmedAppointment?.date ?? bookingDate, language)} · {formatTime(confirmedAppointment?.time ?? bookingTime, language)}</span><span>{confirmedAppointment?.customerName ?? customerName} · {confirmedAppointment?.customerPhone ?? customerPhone}</span>{(confirmedAppointment?.customerEmail || customerEmail) && <span>{confirmedAppointment?.customerEmail ?? customerEmail}</span>}<strong>{formatPrice(confirmedAppointment?.price ?? selectedService.price, language)}</strong><small>{t.booking.guestNote}</small></div>
           <button className="primary" onClick={() => navigate("home")}>{t.booking.backToExplore} →</button>
-        </div> : <form className="booking-layout" onSubmit={confirmBooking}>
-          <div className="booking-main">
-            <div className="eyebrow">{t.booking.eyebrow}</div><h1>{t.booking.title}<br /><em>{t.booking.titleEmphasis}</em></h1><p className="muted">{t.booking.description}</p>
-            <div className="booking-block">
-              <div className="block-title"><span>01</span><h3>{t.booking.yourService}</h3></div>
-              <div className="chosen-service"><div className={`chosen-icon ${selected.color}`}>{serviceSymbols[selected.id - 1]}</div><div><b>{selectedCopy.name}</b><small>{selectedCopy.duration} · {t.categories[selected.category]}</small></div><strong>{formatPrice(selected.price, language)}</strong></div>
+        </div> : !selectedBusiness || !selectedService ? <div className="empty"><h2>{t.booking.noBusiness}</h2><button className="primary" onClick={() => navigate("home")}>{t.booking.backToExplore}</button></div> : <form className="booking-layout" onSubmit={confirmBooking}>
+          <div className="booking-main"><div className="eyebrow">{t.booking.eyebrow}</div><h1>{t.booking.title}<br /><em>{t.booking.titleEmphasis}</em></h1><p className="muted">{t.booking.description}</p><p className="guest-note">{t.booking.guestNote}</p>
+            <div className="booking-block"><div className="block-title"><span>01</span><h3>{t.booking.business}</h3></div><div className="chosen-service"><div className="chosen-icon lavender">✦</div><div><b>{selectedBusiness.name[language]}</b><small>{t.businessCategories[selectedBusiness.category]} · {selectedBusiness.city}</small></div></div><div className="chosen-service"><div className="chosen-icon lavender">{serviceSymbols[0]}</div><div><b>{formatService(selectedService, language).name}</b><small>{formatService(selectedService, language).duration}</small></div><strong>{formatPrice(selectedService.price, language)}</strong></div></div>
+            <div className="booking-block"><div className="block-title"><span>02</span><h3>{t.booking.dateTime}</h3></div><label className="field-label" htmlFor="booking-date">{t.booking.date}</label><input className="field" id="booking-date" type="date" value={bookingDate} min={today} onChange={(event) => setBookingDate(event.target.value)} required /><label className="field-label time-label">{t.booking.availableTimes}</label>
+              {availableSlots.length === 0 ? <div className="empty slots-empty">{t.booking.noSlots}</div> : <div className="time-grid">{availableSlots.map((slot) => <button key={slot} type="button" className={bookingTime === slot ? "time-slot picked" : "time-slot"} onClick={() => setBookingTime(slot)} aria-pressed={bookingTime === slot}>{formatTime(slot, language)}</button>)}</div>}
             </div>
-            <div className="booking-block">
-              <div className="block-title"><span>02</span><h3>{t.booking.dateTime}</h3></div>
-              <label className="field-label" htmlFor="booking-date">{t.booking.date}</label>
-              <input className="field" id="booking-date" type="date" value={date} onChange={(event) => setDate(event.target.value)} min="2026-11-08" required />
-              <label className="field-label time-label">{t.booking.availableTimes}</label>
-              <div className="time-grid">{times.map((option) => <button key={option} type="button" className={time === option ? "time-slot picked" : "time-slot"} onClick={() => setTime(option)} aria-pressed={time === option}>{option}</button>)}</div>
-            </div>
-            <div className="booking-block">
-              <div className="block-title"><span>03</span><h3>{t.booking.yourDetails}</h3></div>
-              <label className="field-label" htmlFor="customer-name">{t.booking.fullName}</label>
-              <input className="field" id="customer-name" autoComplete="name" placeholder={t.booking.namePlaceholder} value={customer} onChange={(event) => setCustomer(event.target.value)} required />
-              <label className="field-label" htmlFor="customer-email">{t.booking.emailAddress}</label>
-              <input className="field" id="customer-email" type="email" autoComplete="email" placeholder={t.booking.emailPlaceholder} value={email} onChange={(event) => setEmail(event.target.value)} required />
-            </div>
+            <div className="booking-block"><div className="block-title"><span>03</span><h3>{t.booking.yourDetails}</h3></div><label className="field-label" htmlFor="customer-name">{t.booking.fullName}</label><input className="field" id="customer-name" autoComplete="name" placeholder={t.booking.namePlaceholder} value={customerName} onChange={(event) => setCustomerName(event.target.value)} required /><label className="field-label" htmlFor="customer-phone">{t.booking.phoneNumber}</label><input className="field" id="customer-phone" type="tel" autoComplete="tel" inputMode="tel" minLength={7} pattern=".{7,}" placeholder={t.booking.phonePlaceholder} value={customerPhone} onChange={(event) => setCustomerPhone(event.target.value)} required /><label className="field-label" htmlFor="customer-email">{t.booking.customerEmailOptional}</label><input className="field" id="customer-email" type="email" autoComplete="email" placeholder={t.booking.emailPlaceholder} value={customerEmail} onChange={(event) => setCustomerEmail(event.target.value)} /></div>
           </div>
-          <aside className="booking-summary">
-            <div className="eyebrow">{t.booking.summaryEyebrow}</div><h3>{t.booking.summaryTitle}<br />{t.booking.summaryTitleEnding}</h3>
-            <div className="summary-line"><span>{t.booking.service}</span><b>{selectedCopy.name}</b></div>
-            <div className="summary-line"><span>{t.booking.duration}</span><b>{selectedCopy.duration}</b></div>
-            <div className="summary-line"><span>{t.booking.date}</span><b>{formatDate(date, language)}</b></div>
-            <div className="summary-line"><span>{t.booking.time}</span><b>{time}</b></div>
-            <div className="summary-total"><span>{t.booking.total}</span><strong>{formatPrice(selected.price, language)}</strong></div>
-            {formError && <p className="form-error" role="alert">{formError}</p>}
-            <button className="primary full" type="submit">{t.booking.confirmBooking}<span>→</span></button>
-            <small className="secure-note">✦ {t.booking.demoNote}</small>
-          </aside>
+          <aside className="booking-summary"><div className="eyebrow">{t.booking.summaryEyebrow}</div><h3>{t.booking.summaryTitle}<br />{t.booking.summaryTitleEnding}</h3><div className="summary-line"><span>{t.booking.business}</span><b>{selectedBusiness.name[language]}</b></div><div className="summary-line"><span>{t.booking.service}</span><b>{formatService(selectedService, language).name}</b></div><div className="summary-line"><span>{t.booking.duration}</span><b>{formatService(selectedService, language).duration}</b></div><div className="summary-line"><span>{t.booking.date}</span><b>{formatDate(bookingDate, language)}</b></div><div className="summary-line"><span>{t.booking.time}</span><b>{bookingTime ? formatTime(bookingTime, language) : "—"}</b></div><div className="summary-total"><span>{t.booking.total}</span><strong>{formatPrice(selectedService.price, language)}</strong></div>{formError && <p className="form-error" role="alert">{formError}</p>}<button className="primary full" type="submit" disabled={!bookingTime}>{t.booking.confirmBooking}<span>→</span></button><small className="secure-note">{t.booking.guestNote}</small></aside>
         </form>}
       </section>}
 
-      {view === "dashboard" && <section className="dashboard section">
-        <div className="dash-top">
-          <div><div className="eyebrow">{t.dashboard.eyebrow}</div><h1>{t.dashboard.title}<br /><em>{t.dashboard.titleEmphasis}</em></h1><p className="muted">{t.dashboard.description}</p></div>
-          <button className="primary" onClick={() => navigate("home")}>{t.dashboard.customerSite} ↗</button>
-        </div>
-        <div className="dash-stats">
-          <div><span>{t.dashboard.todayAppointments}</span><b>{bookings.filter((booking) => booking.date === "today" || booking.date === date).length}<small>{t.dashboard.appointmentsThisWeek}</small></b></div>
-          <div><span>{t.dashboard.expectedRevenue}</span><b>{formatPrice(286, language)}<small>{t.dashboard.acrossBookings}</small></b></div>
-          <div><span>{t.dashboard.newCustomers}</span><b>12<small>{t.dashboard.thisMonth}</small></b></div>
-          <div><span>{t.dashboard.completionRate}</span><b>96%<small>{t.dashboard.greatWork}</small></b></div>
-        </div>
-        <div className="dash-content">
-          <div className="appointments-panel">
-            <div className="panel-head"><div><h2>{t.dashboard.appointments}</h2><p>{t.dashboard.latestBookings}</p></div><span className="today-tag">● {t.dashboard.liveDemo}</span></div>
-            <div className="appointment-table">
-              <div className="table-head"><span>{t.dashboard.client}</span><span>{t.dashboard.service}</span><span>{t.dashboard.time}</span><span>{t.dashboard.status}</span></div>
-              {bookings.map((booking) => <div className="table-row" key={booking.id}>
-                <div className="client-cell"><i>{booking.customer.split(" ").map((name) => name[0]).join("").slice(0, 2)}</i><b>{booking.customer}</b></div>
-                <span>{t.services[booking.serviceId - 1].name}</span><span>{booking.time}</span>
-                <span><em className={booking.status === "confirmed" ? "status confirmed-status" : "status pending-status"}>{t.booking[booking.status]}</em></span>
-              </div>)}
-            </div>
-          </div>
-          <aside className="quick-panel">
-            <div className="eyebrow">{t.dashboard.quickActions}</div><h3>{t.dashboard.keepMoving}</h3>
-            <button onClick={() => startBooking(services[0])}>＋ {t.dashboard.createBooking}<span>→</span></button>
-            <button onClick={() => navigate("home")}>↗ {t.dashboard.previewCustomerPage}<span>→</span></button>
-            <div className="tip-box"><span>✦</span><p><b>{t.dashboard.goodToKnow}</b><br />{t.dashboard.demoTip}</p></div>
-          </aside>
+      {view === "register" && <section className="account-page section">
+        <div className="account-card"><div className="eyebrow">{t.registration.eyebrow}</div><h1>{t.registration.title}<br /><em>{t.registration.titleEmphasis}</em></h1><p className="muted">{t.registration.description}</p>
+          <form onSubmit={registerBusiness}><label className="field-label" htmlFor="registration-email">{t.registration.email}</label><input className="field" id="registration-email" type="email" autoComplete="email" value={registrationEmail} onChange={(event) => setRegistrationEmail(event.target.value)} required /><label className="field-label" htmlFor="registration-password">{t.registration.password}</label><input className="field" id="registration-password" type="password" autoComplete="new-password" minLength={8} value={registrationPassword} onChange={(event) => setRegistrationPassword(event.target.value)} required /><small className="field-hint">{t.registration.passwordHint}</small><label className="field-label" htmlFor="registration-password-confirm">{t.registration.confirmPassword}</label><input className="field" id="registration-password-confirm" type="password" autoComplete="new-password" minLength={8} value={registrationPasswordConfirm} onChange={(event) => setRegistrationPasswordConfirm(event.target.value)} required />{formError && <p className="form-error" role="alert">{formError}</p>}<button className="primary full" type="submit">{t.registration.submit}<span>→</span></button></form>
+          <p className="account-switch">{t.registration.hasAccount} <button className="text-button" onClick={() => navigate("dashboard")}>{t.registration.openDashboard}</button></p><div className="notice-box">{t.registration.demoWarning}</div>
         </div>
       </section>}
 
-      <footer className="footer">
-        <button className="brand footer-brand" onClick={() => navigate("home")}><span className="brand-mark">r</span><span>re<span className="brand-blue">servo</span></span></button>
-        <span>{t.footer.tagline}</span><span>© 2026 Reservo</span>
-      </footer>
+      {view === "onboarding" && <section className="onboarding-page section">
+        <div className="onboarding-header"><div className="eyebrow">{onboardingStep === 4 ? t.onboarding.published : t.onboarding.eyebrow}</div><h1>{onboardingStep === 4 ? t.onboarding.successTitle : <>{t.onboarding.title}<br /><em>{t.onboarding.titleEmphasis}</em></>}</h1><p className="muted">{onboardingStep === 4 ? t.onboarding.successDescription : t.onboarding.description}</p></div>
+        {onboardingStep === 4 ? <div className="success-card onboarding-success"><div className="success-mark">✓</div><div className="eyebrow">{t.onboarding.published}</div><p>{t.onboarding.publishingNote}</p><button className="primary" onClick={() => navigate("dashboard")}>{t.onboarding.openDashboard}<span>→</span></button></div> : <>
+          <div className="onboarding-steps">{t.onboarding.steps.map((step, index) => <button key={step} type="button" className={index === onboardingStep ? "onboarding-step current" : index < onboardingStep ? "onboarding-step complete" : "onboarding-step"} onClick={() => index < onboardingStep && setOnboardingStep(index)} disabled={index >= onboardingStep}><span>{index < onboardingStep ? "✓" : `0${index + 1}`}</span><b>{step}</b></button>)}</div>
+          <form className="onboarding-card" onSubmit={(event) => { event.preventDefault(); if (onboardingStep < 3) { setOnboardingStep((step) => step + 1); setDraftError(""); } }}>
+            <div className="onboarding-card-heading"><div className="eyebrow">{t.onboarding.stepLabel} 0{onboardingStep + 1} · {t.onboarding.steps[onboardingStep]}</div><p>{t.onboarding.account}: <b>{registrationEmail}</b></p></div>
+            {onboardingStep === 0 && <div className="onboarding-grid">
+              <label className="form-field span-two"><span>{t.onboarding.businessName}</span><input className="field" autoComplete="organization" placeholder={t.onboarding.businessNamePlaceholder} value={draft.name} onChange={(event) => setDraftField("name", event.target.value)} required /></label>
+              <label className="form-field"><span>{t.onboarding.category}</span><select className="field" value={draft.category} onChange={(event) => setDraftField("category", event.target.value as BusinessCategory)} required><option value="">{t.onboarding.chooseCategory}</option>{businessCategoryIds.map((category) => <option key={category} value={category}>{t.businessCategories[category]}</option>)}</select></label>
+              <label className="form-field"><span>{t.onboarding.phone}</span><input className="field" type="tel" autoComplete="tel" value={draft.phone} onChange={(event) => setDraftField("phone", event.target.value)} required /></label>
+              <label className="form-field"><span>{t.onboarding.city}</span><input className="field" autoComplete="address-level2" placeholder={t.onboarding.cityPlaceholder} value={draft.city} onChange={(event) => setDraftField("city", event.target.value)} required /></label>
+              <label className="form-field"><span>{t.onboarding.address}</span><input className="field" autoComplete="street-address" value={draft.address} onChange={(event) => setDraftField("address", event.target.value)} /></label>
+              <label className="form-field"><span>{t.onboarding.businessEmail}</span><input className="field" type="email" autoComplete="email" value={draft.email} onChange={(event) => setDraftField("email", event.target.value)} /></label>
+              <label className="form-field span-two"><span>{t.onboarding.descriptionLabel}</span><textarea className="field textarea" rows={3} placeholder={t.onboarding.descriptionPlaceholder} value={draft.description} onChange={(event) => setDraftField("description", event.target.value)} /></label>
+              <label className="form-field span-two"><span>{t.onboarding.imageUrl}</span><input className="field" type="url" placeholder="https://" value={draft.imageUrl} onChange={(event) => setDraftField("imageUrl", event.target.value)} /><small>{t.onboarding.imageUrlHint}</small></label>
+            </div>}
+            {onboardingStep === 1 && <div className="schedule-editor"><p className="muted">{t.profile.hours}</p>{renderHours(draft.schedule, setDraftSchedule, true)}<div className="closures-editor"><h3>{t.onboarding.closures}</h3><p>{t.onboarding.closuresHint}</p><div className="closure-input"><input className="field" aria-label={t.onboarding.closures} type="date" min={today} value={newClosureDate} onChange={(event) => setNewClosureDate(event.target.value)} /><button className="secondary-button" type="button" onClick={() => { if (newClosureDate && !draft.closures.includes(newClosureDate)) setDraftField("closures", [...draft.closures, newClosureDate].sort()); setNewClosureDate(""); }}>{t.onboarding.addClosure}</button></div>{draft.closures.length === 0 ? <small>{t.onboarding.noClosures}</small> : <ul>{draft.closures.map((date) => <li key={date}>{formatDate(date, language)}<button type="button" aria-label={`${t.onboarding.removeClosure}: ${date}`} onClick={() => setDraftField("closures", draft.closures.filter((item) => item !== date))}>×</button></li>)}</ul>}</div></div>}
+            {onboardingStep === 2 && <div className="service-editor-list">{draft.services.map((service, index) => <fieldset className="service-editor-card" key={service.id}><legend>{t.onboarding.serviceName} {index + 1}</legend>{draft.services.length > 1 && <button type="button" className="remove-service" onClick={() => setDraftField("services", draft.services.filter((item) => item.id !== service.id))}>{t.onboarding.removeService}</button>}<label className="form-field"><span>{t.onboarding.serviceName}</span><input className="field" placeholder={t.onboarding.serviceNamePlaceholder} value={service.name} onChange={(event) => updateDraftService(service.id, { name: event.target.value })} required /></label><label className="form-field"><span>{t.onboarding.serviceDescription}</span><input className="field" value={service.description} onChange={(event) => updateDraftService(service.id, { description: event.target.value })} /></label><div className="onboarding-grid service-numbers"><label className="form-field"><span>{t.onboarding.price}</span><input className="field" type="number" min="0" step="0.01" value={service.price} onChange={(event) => updateDraftService(service.id, { price: event.target.value })} required /></label><label className="form-field"><span>{t.onboarding.duration}</span><input className="field" type="number" min="1" step="1" value={service.duration} onChange={(event) => updateDraftService(service.id, { duration: event.target.value })} required /></label></div></fieldset>)}<button type="button" className="secondary-button" onClick={() => setDraftField("services", [...draft.services, blankDraftService()])}>＋ {t.onboarding.addService}</button></div>}
+            {onboardingStep === 3 && <div className="review-content"><h2>{t.onboarding.reviewTitle}</h2><p className="muted">{t.onboarding.reviewDescription}</p><section className="review-section"><div className="review-section-heading"><h3>{t.onboarding.reviewBusiness}</h3><button type="button" onClick={() => setOnboardingStep(0)}>{t.onboarding.reviewEdit}</button></div><dl className="review-grid"><dt>{t.dashboard.businessName}</dt><dd>{draft.name}</dd><dt>{t.dashboard.category}</dt><dd>{draft.category ? t.businessCategories[draft.category] : ""}</dd><dt>{t.dashboard.phone}</dt><dd>{draft.phone}</dd><dt>{t.dashboard.city}</dt><dd>{draft.city}</dd><dt>{t.dashboard.address}</dt><dd>{draft.address || draft.city}</dd><dt>{t.dashboard.email}</dt><dd>{draft.email || "—"}</dd></dl></section><section className="review-section"><div className="review-section-heading"><h3>{t.onboarding.reviewHours}</h3><button type="button" onClick={() => setOnboardingStep(1)}>{t.onboarding.reviewEdit}</button></div>{renderHours(draft.schedule, () => {}, false)}<p>{t.onboarding.closures}: {draft.closures.length ? draft.closures.map((date) => formatDate(date, language)).join(", ") : t.onboarding.noClosures}</p></section><section className="review-section"><div className="review-section-heading"><h3>{t.onboarding.reviewServices}</h3><button type="button" onClick={() => setOnboardingStep(2)}>{t.onboarding.reviewEdit}</button></div>{draft.services.map((service) => <div className="review-service" key={service.id}><b>{service.name}</b><span>{service.duration} min</span><strong>{service.price} €</strong></div>)}</section><div className="notice-box">{t.onboarding.publishingNote}</div></div>}
+            {draftError && <p className="form-error" role="alert">{draftError}</p>}
+            <div className="onboarding-actions">{onboardingStep > 0 && <button type="button" className="secondary-button" onClick={() => { setOnboardingStep((step) => step - 1); setDraftError(""); }}>← {t.onboarding.previous}</button>}{onboardingStep < 3 ? <button type="submit" className="primary">{t.onboarding.next}<span>→</span></button> : <button type="button" className="primary" onClick={publishOnboarding}>{t.onboarding.publish}<span>→</span></button>}</div>
+          </form>
+        </>}
+      </section>}
+
+      {view === "dashboard" && currentBusiness && <>
+        <section className="dashboard section">
+          <div className="dashboard-notice"><b>{t.dashboard.demoTitle}</b><span>{t.dashboard.demoDescription}</span><button onClick={endDemoSession}>{t.dashboard.signOut}</button></div>
+          <div className="dash-top"><div><div className="eyebrow">{t.dashboard.eyebrow} · {currentBusiness.name[language]}</div><h1>{t.dashboard.title}<br /><em>{t.dashboard.titleEmphasis}</em></h1><p className="muted">{t.dashboard.description}</p></div><button className="primary" onClick={() => openBusiness(currentBusiness)}>{t.dashboard.customerSite}<span>↗</span></button></div>
+          <div className="dashboard-toolbar"><nav className="dashboard-tabs" aria-label={t.dashboard.quickActions}>{dashboardTabs.map((tab) => <button key={tab} type="button" className={dashboardTab === tab ? "dashboard-tab selected" : "dashboard-tab"} onClick={() => { setDashboardTab(tab); setDashboardDraft(currentBusiness); setDashboardMessage(""); }}>{dashboardTabLabels[tab]}</button>)}</nav><div className="publish-controls"><span className={currentBusiness.isPublished ? "publish-status published" : "publish-status"}>{currentBusiness.isPublished ? t.dashboard.published : t.dashboard.unpublished}</span><button className="secondary-button" disabled={!currentBusiness.isPublished && !currentBusiness.services.some((service) => service.active)} onClick={() => setBusinesses((previous) => previous.map((business) => business.id === currentBusiness.id && (business.isPublished || business.services.some((service) => service.active)) ? { ...business, isPublished: !business.isPublished } : business))}>{currentBusiness.isPublished ? t.dashboard.unpublish : t.dashboard.publish}</button></div></div>
+          {!currentBusiness.services.some((service) => service.active) && <p className="form-error">{t.dashboard.publishNeedsService}</p>}
+          {dashboardMessage && <p className="success-notice" role="status">{dashboardMessage}</p>}
+          {dashboardTab === "overview" && <><div className="dash-stats"><div><span>{t.dashboard.appointmentsCount}</span><b>{appointments.filter((appointment) => appointment.businessId === currentBusiness.id).length}<small>{t.dashboard.demoTitle}</small></b></div><div><span>{t.dashboard.upcoming}</span><b>{appointments.filter((appointment) => appointment.businessId === currentBusiness.id && appointment.date >= today && appointment.status === "confirmed").length}<small>{t.dashboard.appointmentsThisWeek}</small></b></div><div><span>{t.dashboard.servicesTab}</span><b>{currentBusiness.services.filter((service) => service.active).length}<small>{t.dashboard.servicesTab}</small></b></div><div><span>{t.dashboard.completionRate}</span><b>{currentBusiness.isPublished ? t.dashboard.active : t.dashboard.unpublished}<small>{currentBusiness.city}</small></b></div></div><div className="dash-content"><div className="appointments-panel"><div className="panel-head"><div><h2>{t.dashboard.upcoming}</h2><p>{t.dashboard.latestBookings}</p></div></div>{renderAppointments(appointments.filter((appointment) => appointment.businessId === currentBusiness.id && appointment.date >= today).sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`)).slice(0, 5), true)}</div><aside className="quick-panel"><div className="eyebrow">{t.dashboard.quickActions}</div><h3>{t.dashboard.keepMoving}</h3><button onClick={() => { setDashboardTab("services"); setServiceEditor({ ...blankDraftService(), price: "0", duration: "30" }); }}>＋ {t.dashboard.addService}<span>→</span></button><button onClick={() => openBusiness(currentBusiness)}>↗ {t.dashboard.previewCustomerPage}<span>→</span></button><div className="tip-box"><span>✦</span><p><b>{t.dashboard.goodToKnow}</b><br />{t.dashboard.demoDescription}</p></div></aside></div></>}
+          {dashboardTab === "upcoming" && <section className="dashboard-panel"><div className="panel-head"><div><h2>{t.dashboard.upcoming}</h2><p>{t.dashboard.latestBookings}</p></div></div>{renderAppointments(appointments.filter((appointment) => appointment.businessId === currentBusiness.id && appointment.date >= today).sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`)), true)}</section>}
+          {dashboardTab === "history" && <section className="dashboard-panel"><div className="panel-head"><div><h2>{t.dashboard.history}</h2><p>{t.dashboard.latestBookings}</p></div></div>{renderAppointments(appointments.filter((appointment) => appointment.businessId === currentBusiness.id && (appointment.date < today || appointment.status !== "confirmed")), false)}</section>}
+          {dashboardTab === "services" && <section className="dashboard-panel"><div className="panel-head"><div><h2>{t.dashboard.servicesTab}</h2><p>{t.dashboard.demoDescription}</p></div><button className="primary small" onClick={() => setServiceEditor({ ...blankDraftService(), price: "0", duration: "30" })}>＋ {t.dashboard.addService}</button></div>{currentBusiness.services.length === 0 && <div className="dashboard-empty">{t.dashboard.noServices}</div>}{currentBusiness.services.map((service) => <div className="dashboard-service-row" key={service.id}><div><b>{service.name[language]}</b><small>{service.description[language]}</small></div><span>{service.durationMinutes} min</span><strong>{formatPrice(service.price, language)}</strong><button className="text-button" onClick={() => setServiceEditor({ id: service.id, name: service.name[language], description: service.description[language], price: String(service.price), duration: String(service.durationMinutes) })}>{t.onboarding.reviewEdit}</button><button className="text-button danger-text" onClick={() => setBusinesses((previous) => previous.map((business) => { if (business.id !== currentBusiness.id) return business; const services = business.services.filter((item) => item.id !== service.id); return { ...business, services, isPublished: services.some((item) => item.active) && business.isPublished }; }))}>×</button></div>)}
+            {serviceEditor && <form className="service-edit-form" onSubmit={saveDashboardService}><h3>{t.dashboard.addService}</h3><div className="onboarding-grid"><label className="form-field"><span>{t.onboarding.serviceName}</span><input className="field" value={serviceEditor.name} onChange={(event) => serviceEditorField("name", event.target.value)} required /></label><label className="form-field"><span>{t.onboarding.serviceDescription}</span><input className="field" value={serviceEditor.description} onChange={(event) => serviceEditorField("description", event.target.value)} /></label><label className="form-field"><span>{t.onboarding.price}</span><input className="field" type="number" min="0" step="0.01" value={serviceEditor.price} onChange={(event) => serviceEditorField("price", event.target.value)} required /></label><label className="form-field"><span>{t.onboarding.duration}</span><input className="field" type="number" min="1" value={serviceEditor.duration} onChange={(event) => serviceEditorField("duration", event.target.value)} required /></label></div><div className="onboarding-actions"><button type="button" className="secondary-button" onClick={() => setServiceEditor(null)}>{t.onboarding.previous}</button><button className="primary" type="submit">{t.dashboard.save}</button></div></form>}
+          </section>}
+          {dashboardTab === "hours" && dashboardDraft && <form className="dashboard-panel" onSubmit={saveDashboardHours}><div className="panel-head"><div><h2>{t.dashboard.hoursTab}</h2><p>{t.onboarding.closuresHint}</p></div></div>{renderHours(dashboardDraft.schedule, (weekday, change) => setDashboardDraft((previous) => previous ? { ...previous, schedule: previous.schedule.map((day) => day.weekday === weekday ? { ...day, ...change } : day) } : previous), true)}<div className="closures-editor"><h3>{t.onboarding.closures}</h3><div className="closure-input"><input className="field" aria-label={t.onboarding.closures} type="date" min={today} value={newClosureDate} onChange={(event) => setNewClosureDate(event.target.value)} /><button type="button" className="secondary-button" onClick={() => { if (newClosureDate && !dashboardDraft.closures.includes(newClosureDate)) updateDashboardBusiness({ closures: [...dashboardDraft.closures, newClosureDate].sort() }); setNewClosureDate(""); }}>{t.onboarding.addClosure}</button></div>{dashboardDraft.closures.map((date) => <span className="closure-chip" key={date}>{formatDate(date, language)}<button type="button" onClick={() => updateDashboardBusiness({ closures: dashboardDraft.closures.filter((item) => item !== date) })}>×</button></span>)}</div><button className="primary" type="submit">{t.dashboard.save}</button></form>}
+          {dashboardTab === "profile" && dashboardDraft && <form className="dashboard-panel dashboard-profile-form" onSubmit={saveDashboardProfile}><div className="panel-head"><div><h2>{t.dashboard.profileTab}</h2><p>{t.dashboard.demoDescription}</p></div></div><div className="onboarding-grid"><label className="form-field"><span>{t.onboarding.businessName}</span><input className="field" value={dashboardDraft.name[language]} onChange={(event) => updateDashboardBusiness({ name: sameText(event.target.value) })} required /></label><label className="form-field"><span>{t.onboarding.category}</span><select className="field" value={dashboardDraft.category} onChange={(event) => updateDashboardBusiness({ category: event.target.value as BusinessCategory })}>{businessCategoryIds.map((category) => <option value={category} key={category}>{t.businessCategories[category]}</option>)}</select></label><label className="form-field"><span>{t.onboarding.phone}</span><input className="field" type="tel" value={dashboardDraft.phone} onChange={(event) => updateDashboardBusiness({ phone: event.target.value })} required /></label><label className="form-field"><span>{t.onboarding.businessEmail}</span><input className="field" type="email" value={dashboardDraft.email} onChange={(event) => updateDashboardBusiness({ email: event.target.value })} /></label><label className="form-field"><span>{t.onboarding.city}</span><input className="field" value={dashboardDraft.city} onChange={(event) => updateDashboardBusiness({ city: event.target.value })} required /></label><label className="form-field"><span>{t.onboarding.address}</span><input className="field" value={dashboardDraft.address} onChange={(event) => updateDashboardBusiness({ address: event.target.value })} /></label><label className="form-field span-two"><span>{t.onboarding.descriptionLabel}</span><textarea className="field textarea" rows={3} value={dashboardDraft.description[language]} onChange={(event) => updateDashboardBusiness({ description: sameText(event.target.value) })} /></label><label className="form-field span-two"><span>{t.onboarding.imageUrl}</span><input className="field" type="url" value={dashboardDraft.imageUrl} onChange={(event) => updateDashboardBusiness({ imageUrl: event.target.value })} /></label></div><button className="primary" type="submit">{t.dashboard.save}</button></form>}
+        </section>
+      </>}
+      {view === "dashboard" && !currentBusiness && <section className="account-page section"><div className="account-card"><div className="eyebrow">{t.dashboard.accessDenied}</div><h1>{t.registration.title}<br /><em>{t.registration.titleEmphasis}</em></h1><p>{t.registration.description}</p><button className="primary" onClick={() => navigate("register")}>{t.nav.registerBusiness}<span>→</span></button></div></section>}
+
+      <footer className="footer"><button className="brand footer-brand" onClick={() => navigate("home")}><span className="brand-mark">r</span><span>re<span className="brand-blue">servo</span></span></button><span>{t.footer.tagline}</span><span>© 2026 Reservo</span></footer>
     </main>
   );
 }

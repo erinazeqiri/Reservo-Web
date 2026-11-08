@@ -5,11 +5,11 @@ A responsive booking platform concept for local service businesses and their cus
 ## What's included
 
 - Premium, responsive landing page and service discovery.
-- Complete Albanian and English interface, with Albanian as the default and language choice saved in the browser.
-- Category filters and service search.
-- Customer booking flow with date/time selection and confirmation.
-- Business dashboard with sample appointments and overview metrics.
-- Supabase/PostgreSQL multi-tenant schema foundation in `supabase/schema.sql`.
+- Albanian and English interface, with Albanian as the default and language choice saved in the browser.
+- Business directory with category and keyword search, featured and recent listings, business profiles, services, prices, and working hours.
+- Guest booking flow with required name and phone, optional email, date and availability selection, and a booking confirmation. Customers do not need an account.
+- Four-step business setup, service and schedule management, appointment lists, business profile editing, and publish controls.
+- Supabase/PostgreSQL schema foundation for business categories, owner membership, locations, hours, closures, services, and bookings.
 - Centralized brand tokens in `src/lib/branding.ts`.
 
 ## Run locally
@@ -25,6 +25,16 @@ Open http://localhost:3000.
 
 Use the **AL / EN** switcher in the navigation to change languages. The selection applies immediately across discovery, booking, confirmation, and the business dashboard, and is remembered when you return or reload the page.
 
+## Prototype and backend status
+
+The customer and business flows currently run in **prototype mode**. Example directory entries are sample data; businesses created in onboarding and their bookings exist only in the current page session. They are not written to the database, shared with another browser, or restored after refresh. The prototype banner indicates this throughout the app.
+
+The registration form does not create an authenticated account and never stores the entered password. The dashboard is a same-session UI demonstration, not an access-controlled owner portal. Do not use it for real accounts or customer information.
+
+`supabase/schema.sql` is a database foundation only. No Supabase client, URL, keys, authentication flow, database connection, publication query, or booking API is configured. Row-level security is enabled without permissive policies. Before production, configure Supabase Auth and storage, apply reviewed owner-scoped RLS policies, expose a safe public directory, and create a server-side/transactional guest-booking operation that validates working hours, closures, service activity, and overlapping reservations. Do not implement these operations using client-side storage or the public anon key alone.
+
+The business profile image field accepts a public image URL in this prototype; file uploads require a configured storage service.
+
 To create a production build:
 
 ```bash
@@ -32,19 +42,13 @@ npm run build
 npm start
 ```
 
-## Demo limitations
-
-This first build is a **front-end demo**. Bookings are stored only in React state and reset when you refresh. The dashboard uses sample data. There is no live authentication, database, email delivery, payment processing, or real availability checking yet.
-
-The SQL file is the proposed Supabase database foundation, not a production-ready deployment. It enables RLS but intentionally does not add permissive policies. Before connecting real customers, implement and test membership-scoped policies and a secure guest-booking RPC.
-
 ## Next development milestones
 
-1. Connect Supabase Auth and apply reviewed RLS policies.
-2. Implement business onboarding, locations, services, staff, and schedules.
-3. Add real availability calculation and conflict-safe booking creation.
-4. Add customer and business account flows, notifications, and plan limits.
-5. Package the responsive web app for Android with Capacitor.
+1. Configure Supabase Auth and complete the owner sign-up/session flow.
+2. Apply and test owner-scoped RLS policies and the public business directory.
+3. Persist onboarding, business hours, closures, services, and profile images.
+4. Add a transactional guest-booking API with server-validated availability and conflict protection.
+5. Add notifications, account recovery, and plan limits.
 
 ## Tech
 
