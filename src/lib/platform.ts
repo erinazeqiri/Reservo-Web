@@ -1,6 +1,6 @@
 export const businessCategoryIds = [
   "hair_salon",
-  "barber",
+  "barbershop",
   "beauty_salon",
   "nail_studio",
   "spa_wellness",
@@ -79,118 +79,6 @@ export const defaultSchedule: WorkingDay[] = weekdays.map((_, weekday) => ({
   opensAt: weekday === 6 ? "10:00" : "09:00",
   closesAt: weekday === 6 ? "14:00" : "17:00",
 }));
-
-function localized(al: string, en: string): LocalizedText {
-  return { al, en };
-}
-
-function makeService(
-  id: string,
-  nameAl: string,
-  nameEn: string,
-  descriptionAl: string,
-  descriptionEn: string,
-  price: number,
-  durationMinutes: number,
-): Service {
-  return {
-    id,
-    name: localized(nameAl, nameEn),
-    description: localized(descriptionAl, descriptionEn),
-    price,
-    durationMinutes,
-    active: true,
-  };
-}
-
-function makeBusiness(
-  id: string,
-  nameAl: string,
-  nameEn: string,
-  category: BusinessCategory,
-  phone: string,
-  city: string,
-  descriptionAl: string,
-  descriptionEn: string,
-  createdAt: string,
-  services: Service[],
-): Business {
-  return {
-    id,
-    ownerEmail: null,
-    name: localized(nameAl, nameEn),
-    category,
-    phone,
-    city,
-    address: city,
-    email: "",
-    description: localized(descriptionAl, descriptionEn),
-    imageUrl: "",
-    schedule: defaultSchedule,
-    closures: [],
-    services,
-    featured: id !== "sample-urban-dental",
-    isPublished: true,
-    isActive: true,
-    createdAt,
-  };
-}
-
-export const sampleBusinesses: Business[] = [
-  makeBusiness(
-    "sample-studio-form",
-    "Studio Form",
-    "Studio Form",
-    "hair_salon",
-    "+383 38 555 101",
-    "Prishtinë",
-    "Prerje flokësh me stil dhe kujdes profesional.",
-    "Thoughtful haircuts and expert styling.",
-    "2026-10-24T09:00:00.000Z",
-    [
-      makeService("sample-studio-cut", "Prerje dhe stilim", "Cut & style", "Larje, prerje dhe stilim sipas dëshirës.", "A tailored wash, cut and finish.", 28, 45),
-      makeService("sample-studio-color", "Ngjyrosje flokësh", "Hair colour", "Ngjyrë profesionale dhe rezultat natyral.", "Professional colour for a natural finish.", 65, 90),
-    ],
-  ),
-  makeBusiness(
-    "sample-atolye-nails",
-    "Atolye Nails",
-    "Atolye Nails",
-    "nail_studio",
-    "+383 38 555 102",
-    "Prishtinë",
-    "Manikyr i kujdesshëm dhe ngjyra për çdo ditë.",
-    "Considered manicures and colour for every day.",
-    "2026-10-29T09:00:00.000Z",
-    [makeService("sample-atolye-mani", "Manikyr klasik", "Classic manicure", "Thonj të rregulluar bukur, me rezultat afatgjatë.", "A clean, polished look that lasts.", 24, 50)],
-  ),
-  makeBusiness(
-    "sample-vita-wellness",
-    "Vita Wellness",
-    "Vita Wellness",
-    "spa_wellness",
-    "+383 38 555 103",
-    "Prizren",
-    "Trajtime rigjeneruese për trupin dhe mendjen.",
-    "Restorative treatments for body and mind.",
-    "2026-11-02T09:00:00.000Z",
-    [makeService("sample-vita-massage", "Masazh relaksues", "Relaxation massage", "Një masazh i plotë për t'u çlodhur.", "A restorative full-body massage.", 55, 60)],
-  ),
-  makeBusiness(
-    "sample-urban-dental",
-    "Urban Dental",
-    "Urban Dental",
-    "dental_clinic",
-    "+383 38 555 104",
-    "Prishtinë",
-    "Kujdes i besueshëm dentar me takime të lehta.",
-    "Trusted dental care with straightforward appointments.",
-    "2026-11-05T09:00:00.000Z",
-    [makeService("sample-urban-checkup", "Kontroll dentar", "Dental check-up", "Kontroll rutinë dhe këshilla për kujdesin dentar.", "A routine examination and personalised advice.", 30, 30)],
-  ),
-];
-
-export const sampleAppointments: Appointment[] = [];
 
 export function makeId(prefix: string): string {
   return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`}`;

@@ -25,15 +25,17 @@ Open http://localhost:3000.
 
 Use the **AL / EN** switcher in the navigation to change languages. The selection applies immediately across discovery, booking, confirmation, and the business dashboard, and is remembered when you return or reload the page.
 
-## Prototype and backend status
+## Supabase setup
 
-The customer and business flows currently run in **prototype mode**. Example directory entries are sample data; businesses created in onboarding and their bookings exist only in the current page session. They are not written to the database, shared with another browser, or restored after refresh. The prototype banner indicates this throughout the app.
+The app uses Supabase Auth and the configured PostgreSQL API. Configure `.env.local` with the project URL and publishable/anon key from `.env.example`.
 
-The registration form does not create an authenticated account and never stores the entered password. The dashboard is a same-session UI demonstration, not an access-controlled owner portal. Do not use it for real accounts or customer information.
+In Supabase Auth settings, enable email confirmations and add the app origin (for example `http://localhost:3000`) to the allowed redirect URLs. Registration returns users to the app after email confirmation; they can then sign in and continue onboarding or open their existing business dashboard. Supabase client sessions persist across refreshes.
 
-`supabase/schema.sql` is a database foundation only. No Supabase client, URL, keys, authentication flow, database connection, publication query, or booking API is configured. Row-level security is enabled without permissive policies. Before production, configure Supabase Auth and storage, apply reviewed owner-scoped RLS policies, expose a safe public directory, and create a server-side/transactional guest-booking operation that validates working hours, closures, service activity, and overlapping reservations. Do not implement these operations using client-side storage or the public anon key alone.
+The connected project uses `businesses.created_by` as the owner relationship, with related `locations` and `services` and guest appointments in `appointments`. The `supabase/schema.sql` file is a separate normalized schema draft; do not apply it over the connected project without first reconciling its table and column differences.
 
-The business profile image field accepts a public image URL in this prototype; file uploads require a configured storage service.
+Bookings do not require customer accounts. Business and appointment changes are persisted through Supabase. Row-level security must be configured in the connected project to restrict every owner read/write by `businesses.created_by`; direct client-side filters are not a security boundary. For production-grade concurrent booking protection, add a server-side transactional booking operation or database exclusion constraint for overlapping appointment times.
+
+Business images currently use public image URLs; uploads need a configured Supabase Storage bucket and policies.
 
 To create a production build:
 
@@ -44,11 +46,9 @@ npm start
 
 ## Next development milestones
 
-1. Configure Supabase Auth and complete the owner sign-up/session flow.
-2. Apply and test owner-scoped RLS policies and the public business directory.
-3. Persist onboarding, business hours, closures, services, and profile images.
-4. Add a transactional guest-booking API with server-validated availability and conflict protection.
-5. Add notifications, account recovery, and plan limits.
+1. Verify owner-scoped RLS policies and transactional booking conflict protection in the connected project.
+2. Configure Storage for business image uploads.
+3. Add notifications, account recovery, and plan limits.
 
 ## Tech
 
@@ -56,4 +56,4 @@ npm start
 - React
 - TypeScript
 - Plain CSS (no UI component dependency)
-- Supabase/PostgreSQL schema draft
+- Supabase Auth and PostgreSQL
