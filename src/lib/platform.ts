@@ -1,6 +1,6 @@
 export const businessCategoryIds = [
   "hair_salon",
-  "barbershop",
+  "barber",
   "beauty_salon",
   "nail_studio",
   "spa_wellness",
