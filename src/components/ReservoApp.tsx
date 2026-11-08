@@ -1,101 +1,346 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { translations, type Language } from "@/lib/i18n";
 
-type Service = { id: number; name: string; category: string; duration: string; price: number; rating: string; reviews: number; description: string; color: string; };
-type Booking = { id: number; service: string; customer: string; date: string; time: string; status: "Confirmed" | "Pending"; price: number; };
+type Category = "all" | "hair" | "beauty" | "wellness" | "skincare";
+type Service = { id: number; category: Exclude<Category, "all">; duration: number; price: number; rating: string; reviews: number; color: string };
+type Booking = { id: number; serviceId: number; customer: string; date: string; time: string; status: "confirmed" | "pending"; price: number };
+type View = "home" | "booking" | "dashboard";
 
 const services: Service[] = [
-  { id: 1, name: "Signature haircut", category: "Hair", duration: "45 min", price: 28, rating: "4.9", reviews: 128, description: "A tailored cut, wash and finish.", color: "lavender" },
-  { id: 2, name: "Classic manicure", category: "Beauty", duration: "50 min", price: 24, rating: "4.8", reviews: 96, description: "A clean, polished look that lasts.", color: "peach" },
-  { id: 3, name: "Deep tissue massage", category: "Wellness", duration: "60 min", price: 55, rating: "5.0", reviews: 74, description: "Unwind with a restorative treatment.", color: "mint" },
-  { id: 4, name: "Skin refresh facial", category: "Skincare", duration: "40 min", price: 42, rating: "4.9", reviews: 83, description: "A fresh, hydrated glow in one visit.", color: "blue" },
+  { id: 1, category: "hair", duration: 45, price: 28, rating: "4.9", reviews: 128, color: "lavender" },
+  { id: 2, category: "beauty", duration: 50, price: 24, rating: "4.8", reviews: 96, color: "peach" },
+  { id: 3, category: "wellness", duration: 60, price: 55, rating: "5.0", reviews: 74, color: "mint" },
+  { id: 4, category: "skincare", duration: 40, price: 42, rating: "4.9", reviews: 83, color: "blue" },
 ];
 
 const initialBookings: Booking[] = [
-  { id: 1048, service: "Signature haircut", customer: "Mia Thompson", date: "Today", time: "10:30 AM", status: "Confirmed", price: 28 },
-  { id: 1049, service: "Classic manicure", customer: "Olivia Martin", date: "Today", time: "12:00 PM", status: "Pending", price: 24 },
-  { id: 1050, service: "Deep tissue massage", customer: "Noah Williams", date: "Today", time: "2:15 PM", status: "Confirmed", price: 55 },
-  { id: 1051, service: "Skin refresh facial", customer: "Ava Johnson", date: "Tomorrow", time: "9:00 AM", status: "Confirmed", price: 42 },
+  { id: 1048, serviceId: 1, customer: "Mia Thompson", date: "today", time: "10:30 AM", status: "confirmed", price: 28 },
+  { id: 1049, serviceId: 2, customer: "Olivia Martin", date: "today", time: "12:00 PM", status: "pending", price: 24 },
+  { id: 1050, serviceId: 3, customer: "Noah Williams", date: "today", time: "2:15 PM", status: "confirmed", price: 55 },
+  { id: 1051, serviceId: 4, customer: "Ava Johnson", date: "tomorrow", time: "9:00 AM", status: "confirmed", price: 42 },
 ];
 
 const times = ["9:00 AM", "10:30 AM", "12:00 PM", "1:30 PM", "2:15 PM", "4:00 PM"];
+const categories: Category[] = ["all", "hair", "beauty", "wellness", "skincare"];
+const serviceSymbols = ["✂", "✳", "☼", "❋"];
+
+function formatPrice(price: number, language: Language) {
+  return language === "al" ? `${price} €` : `€${price}`;
+}
+
+function formatDate(date: string, language: Language) {
+  return new Intl.DateTimeFormat(language === "al" ? "sq-AL" : "en-US", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(new Date(`${date}T12:00:00`));
+}
 
 export default function ReservoApp() {
-  const [view, setView] = useState<"home" | "booking" | "dashboard">("home");
-  const [category, setCategory] = useState("All");
-  const [selected, setSelected] = useState<Service>(services[0]);
+  const [language, setLanguage] = useState<Language>("al");
+  const [languageReady, setLanguageReady] = useState(false);
+  const [view, setView] = useState<View>("home");
+  const [category, setCategory] = useState<Category>("all");
+  const [selectedId, setSelectedId] = useState(services[0].id);
   const [date, setDate] = useState("2026-11-10");
-  const [time, setTime] = useState("10:30 AM");
+  const [time, setTime] = useState(times[1]);
   const [customer, setCustomer] = useState("");
   const [email, setEmail] = useState("");
   const [bookings, setBookings] = useState<Booking[]>(initialBookings);
   const [confirmed, setConfirmed] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
   const [search, setSearch] = useState("");
+  const [formError, setFormError] = useState("");
+  const [sectionToScroll, setSectionToScroll] = useState<string | null>(null);
+  const languageInitialized = useRef(false);
 
-  const filtered = useMemo(() => services.filter(s =>
-    (category === "All" || s.category === category) &&
-    (s.name.toLowerCase().includes(search.toLowerCase()) || s.description.toLowerCase().includes(search.toLowerCase()))
-  ), [category, search]);
+  const t = translations[language];
+  const selected = services.find((service) => service.id === selectedId) ?? services[0];
+  const selectedCopy = t.services[selected.id - 1];
+
+  useEffect(() => {
+    if (!languageInitialized.current) {
+      languageInitialized.current = true;
+      const savedLanguage = window.localStorage.getItem("reservo-language");
+      if (savedLanguage === "al" || savedLanguage === "en") setLanguage(savedLanguage);
+    }
+    setLanguageReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!languageReady) return;
+    window.localStorage.setItem("reservo-language", language);
+    document.documentElement.lang = language === "al" ? "sq" : "en";
+    document.title = t.metadata.title;
+    document.querySelector('meta[name="description"]')?.setAttribute("content", t.metadata.description);
+  }, [language, languageReady, t]);
+
+  useEffect(() => {
+    if (!sectionToScroll) return;
+    document.getElementById(sectionToScroll)?.scrollIntoView({ behavior: "smooth" });
+    setSectionToScroll(null);
+  }, [sectionToScroll, view]);
+
+  const filtered = useMemo(() => services.filter((service, index) => {
+    const copy = translations[language].services[index];
+    const matchesCategory = category === "all" || service.category === category;
+    const searchText = `${copy.name} ${copy.description} ${translations[language].categories[service.category]}`.toLocaleLowerCase(language === "al" ? "sq-AL" : "en-US");
+    return matchesCategory && searchText.includes(search.toLocaleLowerCase(language === "al" ? "sq-AL" : "en-US"));
+  }), [category, language, search]);
+
+  function navigate(nextView: View) {
+    setView(nextView);
+    setMobileMenu(false);
+    setFormError("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function navigateToSection(sectionId: string) {
+    setMobileMenu(false);
+    if (view === "home") {
+      document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth" });
+      return;
+    }
+    setSectionToScroll(sectionId);
+    setView("home");
+  }
+
+  function chooseLanguage(option: Language) {
+    languageInitialized.current = true;
+    setLanguageReady(true);
+    setLanguage(option);
+  }
 
   function startBooking(service: Service) {
-    setSelected(service); setConfirmed(false); setView("booking"); window.scrollTo({ top: 0, behavior: "smooth" });
+    setSelectedId(service.id);
+    setConfirmed(false);
+    navigate("booking");
   }
-  function confirmBooking() {
-    if (!customer.trim() || !email.trim()) return;
-    setBookings(prev => [{ id: 1052 + prev.length, service: selected.name, customer, date: "Nov 10", time, status: "Confirmed", price: selected.price }, ...prev]);
+
+  function confirmBooking(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!customer.trim() || !email.trim()) {
+      setFormError(t.booking.formError);
+      return;
+    }
+    setBookings((previous) => [{
+      id: 1052 + previous.length,
+      serviceId: selected.id,
+      customer: customer.trim(),
+      date,
+      time,
+      status: "confirmed",
+      price: selected.price,
+    }, ...previous]);
+    setFormError("");
     setConfirmed(true);
   }
 
   return (
     <main>
       <header className="topbar">
-        <button className="brand" onClick={() => setView("home")} aria-label="Reservo home"><span className="brand-mark">r</span><span>re<span className="brand-blue">servo</span></span></button>
-        <nav className={mobileMenu ? "nav nav-open" : "nav"}>
-          <button className={view === "home" ? "nav-link active" : "nav-link"} onClick={() => {setView("home");setMobileMenu(false);}}>Explore</button>
-          <button className="nav-link" onClick={() => {setView("dashboard");setMobileMenu(false);}}>For businesses</button>
-          <a className="nav-link" href="#how">How it works</a>
+        <button className="brand" onClick={() => navigate("home")} aria-label={t.nav.home}>
+          <span className="brand-mark">r</span>
+          <span>re<span className="brand-blue">servo</span></span>
+        </button>
+        <nav className={mobileMenu ? "nav nav-open" : "nav"} aria-label={t.nav.primaryNavigation}>
+          <button className={view === "home" ? "nav-link active" : "nav-link"} onClick={() => navigate("home")}>{t.nav.explore}</button>
+          <button className={view === "dashboard" ? "nav-link active" : "nav-link"} onClick={() => navigate("dashboard")}>{t.nav.forBusinesses}</button>
+          <button className="nav-link" onClick={() => navigateToSection("how")}>{t.nav.howItWorks}</button>
         </nav>
-        <div className="top-actions"><button className="text-button" onClick={() => setView("dashboard")}>Sign in</button><button className="primary small" onClick={() => setView("dashboard")}>Business portal <span>↗</span></button></div>
-        <button className="menu-toggle" onClick={() => setMobileMenu(!mobileMenu)} aria-label="Toggle menu">☰</button>
+        <div className="language-switcher" role="group" aria-label={t.nav.chooseLanguage}>
+          {(["al", "en"] as const).map((option) => (
+            <button key={option} type="button" className={language === option ? "language-option selected" : "language-option"} onClick={() => chooseLanguage(option)} aria-pressed={language === option}>
+              {option.toUpperCase()}
+            </button>
+          ))}
+        </div>
+        <div className="top-actions">
+          <button className="text-button" onClick={() => navigate("dashboard")}>{t.nav.signIn}</button>
+          <button className="primary small" onClick={() => navigate("dashboard")}>{t.nav.businessPortal}<span>↗</span></button>
+        </div>
+        <button className="menu-toggle" onClick={() => setMobileMenu(!mobileMenu)} aria-label={t.nav.toggleMenu} aria-expanded={mobileMenu}>☰</button>
       </header>
 
       {view === "home" && <>
         <section className="hero">
           <div className="hero-copy">
-            <div className="eyebrow"><span className="spark">✳</span> THE BETTER WAY TO BOOK</div>
-            <h1>Your time,<br /><em>beautifully</em> booked.</h1>
-            <p className="hero-sub">Discover trusted local businesses and book the services you love — without the back-and-forth.</p>
-            <div className="hero-search"><span className="search-icon">⌕</span><input value={search} onChange={e => setSearch(e.target.value)} placeholder="What are you looking for?" /><button onClick={() => document.getElementById("discover")?.scrollIntoView({behavior:"smooth"})}>Explore <span>→</span></button></div>
-            <div className="trust-row"><div className="avatar-stack"><i>J</i><i>M</i><i>A</i><i>+</i></div><span><b>1,200+</b> happy appointments booked</span></div>
+            <div className="eyebrow"><span className="spark">✳</span>{t.hero.eyebrow}</div>
+            <h1>{t.hero.titleLine}<br /><em>{t.hero.titleEmphasis}</em>{t.hero.titleEnding}</h1>
+            <p className="hero-sub">{t.hero.description}</p>
+            <div className="hero-search">
+              <span className="search-icon" aria-hidden="true">⌕</span>
+              <input aria-label={t.hero.searchPlaceholder} value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t.hero.searchPlaceholder} />
+              <button onClick={() => navigateToSection("discover")}>{t.hero.searchButton}<span>→</span></button>
+            </div>
+            <div className="trust-row">
+              <div className="avatar-stack" aria-hidden="true"><i>J</i><i>M</i><i>A</i><i>+</i></div>
+              <span><b>1,200+</b> {t.hero.socialProof}</span>
+            </div>
           </div>
-          <div className="hero-art">
-            <div className="art-glow"></div><div className="art-card main-art"><div className="art-top"><span className="art-pill">YOUR NEXT APPOINTMENT</span><span className="dots">•••</span></div><div className="art-date"><span>MON</span><b>10</b><span>NOVEMBER</span></div><div className="art-rule"></div><div className="art-service"><div className="service-avatar">✂</div><div><b>Signature haircut</b><small>Studio Form · 45 min</small></div><span className="check">✓</span></div><div className="art-bottom"><span>10:30 AM</span><b>Confirmed</b></div></div>
-            <div className="floating-note"><span className="note-icon">✦</span><div><b>All set!</b><small>Your booking is confirmed.</small></div></div>
-            <div className="floating-stats"><span className="stats-icon">↗</span><div><b>Easy booking</b><small>In just a few clicks</small></div></div>
-            <div className="art-orbit orbit-one"></div><div className="art-orbit orbit-two"></div>
+          <div className="hero-art" aria-label={t.hero.illustrationLabel}>
+            <div className="art-glow" />
+            <div className="art-card main-art">
+              <div className="art-top"><span className="art-pill">{t.hero.appointmentPreview}</span><span className="dots">•••</span></div>
+              <div className="art-date"><span>{t.hero.previewWeekday}</span><b>10</b><span>{t.hero.previewMonth}</span></div>
+              <div className="art-rule" />
+              <div className="art-service">
+                <div className="service-avatar">✂</div>
+                <div><b>{t.services[0].name}</b><small>{t.hero.previewBusiness} · {t.services[0].duration}</small></div>
+                <span className="check">✓</span>
+              </div>
+              <div className="art-bottom"><span>10:30 AM</span><b>{t.booking.confirmed}</b></div>
+            </div>
+            <div className="floating-note"><span className="note-icon">✦</span><div><b>{t.hero.allSet}</b><small>{t.hero.bookingConfirmed}</small></div></div>
+            <div className="floating-stats"><span className="stats-icon">↗</span><div><b>{t.hero.easyBooking}</b><small>{t.hero.fewClicks}</small></div></div>
+            <div className="art-orbit orbit-one" /><div className="art-orbit orbit-two" />
           </div>
         </section>
 
-        <section className="metrics"><div><b>01</b><span>Find your service</span></div><div><b>02</b><span>Choose your time</span></div><div><b>03</b><span>You're all booked</span></div><div className="metric-note">Less planning. More living.</div></section>
+        <section className="metrics" aria-label={t.home.stepsHeading}>
+          {t.home.steps.map((step, index) => <div key={step}><b>0{index + 1}</b><span>{step}</span></div>)}
+          <div className="metric-note">{t.home.metricNote}</div>
+        </section>
 
         <section className="discover section" id="discover">
-          <div className="section-head"><div><div className="eyebrow">GOOD THINGS ARE CLOSE</div><h2>Find your <em>next</em> favourite.</h2><p>Little moments of self-care, made easy to schedule.</p></div><button className="view-all" onClick={() => setCategory("All")}>View all services <span>↗</span></button></div>
-          <div className="filters">{["All", "Hair", "Beauty", "Wellness", "Skincare"].map(c => <button key={c} className={category === c ? "filter selected" : "filter"} onClick={() => setCategory(c)}>{c}</button>)}</div>
-          <div className="service-grid">{filtered.map((s, i) => <article className="service-card" key={s.id}><div className={`service-visual ${s.color}`}><span className="visual-number">0{i+1}</span><span className="visual-symbol">{["✂","✳","☼","❋"][services.indexOf(s)]}</span><span className="visual-category">{s.category}</span></div><div className="service-info"><div className="service-title-row"><h3>{s.name}</h3><span className="rating">★ {s.rating}</span></div><p>{s.description}</p><div className="service-meta"><span>◷ {s.duration}</span><b>€{s.price}</b></div><button className="book-link" onClick={() => startBooking(s)}>Book appointment <span>→</span></button></div></article>)}</div>
-          {filtered.length === 0 && <div className="empty">No services match that search. Try another keyword.</div>}
+          <div className="section-head">
+            <div><div className="eyebrow">{t.home.discoverEyebrow}</div><h2>{t.home.discoverTitle} <em>{t.home.discoverTitleEmphasis}</em>.</h2><p>{t.home.discoverDescription}</p></div>
+            <button className="view-all" onClick={() => { setCategory("all"); setSearch(""); }}>{t.home.viewAll}<span>↗</span></button>
+          </div>
+          <div className="filters" role="group" aria-label={t.home.categoriesHeading}>
+            {categories.map((item) => <button key={item} className={category === item ? "filter selected" : "filter"} onClick={() => setCategory(item)} aria-pressed={category === item}>{t.categories[item]}</button>)}
+          </div>
+          <div className="service-grid">
+            {filtered.map((service) => {
+              const copy = t.services[service.id - 1];
+              return <article className="service-card" key={service.id}>
+                <div className={`service-visual ${service.color}`}>
+                  <span className="visual-number">0{service.id}</span><span className="visual-symbol">{serviceSymbols[service.id - 1]}</span><span className="visual-category">{t.categories[service.category]}</span>
+                </div>
+                <div className="service-info">
+                  <div className="service-title-row"><h3>{copy.name}</h3><span className="rating">★ {service.rating}</span></div>
+                  <p>{copy.description}</p>
+                  <div className="service-meta"><span>◷ {copy.duration}</span><b>{formatPrice(service.price, language)}</b></div>
+                  <button className="book-link" onClick={() => startBooking(service)}>{t.home.bookAppointment}<span>→</span></button>
+                </div>
+              </article>;
+            })}
+          </div>
+          {filtered.length === 0 && <div className="empty">{t.home.noServices}</div>}
         </section>
 
-        <section className="how section" id="how"><div className="how-intro"><div className="eyebrow">SIMPLE BY DESIGN</div><h2>Good plans.<br /><em>No phone calls.</em></h2><p>From finding the right service to getting your confirmation, Reservo keeps the whole process refreshingly simple.</p></div><div className="how-steps"><div><span>01</span><div><h3>Discover</h3><p>Browse services and find a business that feels right for you.</p></div><b>↗</b></div><div><span>02</span><div><h3>Pick a time</h3><p>See available slots and choose what works with your day.</p></div><b>↗</b></div><div><span>03</span><div><h3>You're booked</h3><p>Get your appointment details, all in one place.</p></div><b>↗</b></div></div></section>
-        <section className="business-cta"><div><div className="eyebrow light">FOR THE PEOPLE BEHIND THE BUSINESS</div><h2>Your business.<br /><em>Less busywork.</em></h2><p>Keep your appointments, team and day moving in one clear place.</p><button className="light-button" onClick={() => setView("dashboard")}>Explore the business portal <span>→</span></button></div><div className="cta-decoration"><div className="cta-ring"></div><div className="mini-dashboard"><div className="mini-head"><span>THIS WEEK</span><b>↗</b></div><strong>24 <small>appointments</small></strong><div className="mini-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div className="mini-foot"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div></div></div></section>
+        <section className="how section" id="how">
+          <div className="how-intro"><div className="eyebrow">{t.home.howEyebrow}</div><h2>{t.home.howTitle}<br /><em>{t.home.howTitleEmphasis}</em></h2><p>{t.home.howDescription}</p></div>
+          <div className="how-steps">
+            {t.home.howSteps.map((step, index) => <div key={step.title}><span>0{index + 1}</span><div><h3>{step.title}</h3><p>{step.description}</p></div><b>↗</b></div>)}
+          </div>
+        </section>
+
+        <section className="benefits section">
+          <div className="benefits-heading"><div className="eyebrow">{t.home.benefitsEyebrow}</div><h2>{t.home.benefitsTitle}<br /><em>{t.home.benefitsTitleEmphasis}</em></h2></div>
+          <div className="benefits-grid">
+            <article className="benefit-card customer-benefit"><span className="benefit-icon">✦</span><div className="eyebrow">{t.home.customerBenefitsLabel}</div><h3>{t.home.customerBenefitsTitle}</h3><p>{t.home.customerBenefitsDescription}</p><ul>{t.home.customerBenefits.map((benefit) => <li key={benefit}><span>✓</span>{benefit}</li>)}</ul></article>
+            <article className="benefit-card business-benefit"><span className="benefit-icon">↗</span><div className="eyebrow">{t.home.businessBenefitsLabel}</div><h3>{t.home.businessBenefitsTitle}</h3><p>{t.home.businessBenefitsDescription}</p><ul>{t.home.businessBenefits.map((benefit) => <li key={benefit}><span>✓</span>{benefit}</li>)}</ul></article>
+          </div>
+        </section>
+
+        <section className="business-cta">
+          <div>
+            <div className="eyebrow light">{t.home.businessCtaEyebrow}</div>
+            <h2>{t.home.businessCtaTitle}<br /><em>{t.home.businessCtaTitleEmphasis}</em></h2>
+            <p>{t.home.businessCtaDescription}</p>
+            <button className="light-button" onClick={() => navigate("dashboard")}>{t.home.businessCtaButton}<span>→</span></button>
+          </div>
+          <div className="cta-decoration"><div className="cta-ring" /><div className="mini-dashboard">
+            <div className="mini-head"><span>{t.home.weekPreview}</span><b>↗</b></div>
+            <strong>24 <small>{t.home.appointments}</small></strong>
+            <div className="mini-bars">{[1, 2, 3, 4, 5, 6, 7].map((day) => <i key={day} />)}</div>
+            <div className="mini-foot">{t.home.weekdays.map((day) => <span key={day}>{day}</span>)}</div>
+          </div></div>
+        </section>
       </>}
 
-      {view === "booking" && <section className="booking-page section"><button className="back-link" onClick={() => setView("home")}>← Back to explore</button>{confirmed ? <div className="success-card"><div className="success-mark">✓</div><div className="eyebrow">YOU'RE ON THE CALENDAR</div><h1>It's a <em>date.</em></h1><p>Your demo appointment has been added. In a live Reservo account, you'd receive a confirmation by email.</p><div className="confirmation-details"><b>{selected.name}</b><span>November 10, 2026 · {time}</span><span>{customer} · {email}</span><strong>€{selected.price}</strong></div><button className="primary" onClick={() => setView("home")}>Back to exploring →</button></div> : <div className="booking-layout"><div className="booking-main"><div className="eyebrow">MAKE IT OFFICIAL</div><h1>Book your <em>moment.</em></h1><p className="muted">A few details and you're all set.</p><div className="booking-block"><div className="block-title"><span>01</span><h3>Your service</h3></div><div className="chosen-service"><div className={`chosen-icon ${selected.color}`}>{["✂","✳","☼","❋"][services.indexOf(selected)]}</div><div><b>{selected.name}</b><small>{selected.duration} · {selected.category}</small></div><strong>€{selected.price}</strong></div></div><div className="booking-block"><div className="block-title"><span>02</span><h3>Choose a date & time</h3></div><label className="field-label">DATE</label><input className="field" type="date" value={date} onChange={e => setDate(e.target.value)} min="2026-11-08" /><label className="field-label time-label">AVAILABLE TIMES</label><div className="time-grid">{times.map(t => <button key={t} className={time === t ? "time-slot picked" : "time-slot"} onClick={() => setTime(t)}>{t}</button>)}</div></div><div className="booking-block"><div className="block-title"><span>03</span><h3>Your details</h3></div><label className="field-label">FULL NAME</label><input className="field" placeholder="e.g. Alex Morgan" value={customer} onChange={e => setCustomer(e.target.value)} /><label className="field-label">EMAIL ADDRESS</label><input className="field" type="email" placeholder="alex@example.com" value={email} onChange={e => setEmail(e.target.value)} /></div></div><aside className="booking-summary"><div className="eyebrow">YOUR APPOINTMENT</div><h3>One less thing<br />to think about.</h3><div className="summary-line"><span>Service</span><b>{selected.name}</b></div><div className="summary-line"><span>Duration</span><b>{selected.duration}</b></div><div className="summary-line"><span>Date</span><b>{new Date(date + "T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</b></div><div className="summary-line"><span>Time</span><b>{time}</b></div><div className="summary-total"><span>Total</span><strong>€{selected.price}</strong></div><button className="primary full" onClick={confirmBooking} disabled={!customer.trim() || !email.trim()}>Confirm booking <span>→</span></button><small className="secure-note">✦ This is a local demo. No payment is collected.</small></aside></div>}</section>}
+      {view === "booking" && <section className="booking-page section">
+        <button className="back-link" onClick={() => navigate("home")}>← {t.booking.back}</button>
+        {confirmed ? <div className="success-card">
+          <div className="success-mark">✓</div><div className="eyebrow">{t.booking.successEyebrow}</div><h1>{t.booking.successTitle}<br /><em>{t.booking.successTitleEmphasis}</em></h1>
+          <p>{t.booking.successDescription}</p>
+          <div className="confirmation-details"><b>{selectedCopy.name}</b><span>{formatDate(date, language)} · {time}</span><span>{customer} · {email}</span><strong>{formatPrice(selected.price, language)}</strong></div>
+          <button className="primary" onClick={() => navigate("home")}>{t.booking.backToExplore} →</button>
+        </div> : <form className="booking-layout" onSubmit={confirmBooking}>
+          <div className="booking-main">
+            <div className="eyebrow">{t.booking.eyebrow}</div><h1>{t.booking.title}<br /><em>{t.booking.titleEmphasis}</em></h1><p className="muted">{t.booking.description}</p>
+            <div className="booking-block">
+              <div className="block-title"><span>01</span><h3>{t.booking.yourService}</h3></div>
+              <div className="chosen-service"><div className={`chosen-icon ${selected.color}`}>{serviceSymbols[selected.id - 1]}</div><div><b>{selectedCopy.name}</b><small>{selectedCopy.duration} · {t.categories[selected.category]}</small></div><strong>{formatPrice(selected.price, language)}</strong></div>
+            </div>
+            <div className="booking-block">
+              <div className="block-title"><span>02</span><h3>{t.booking.dateTime}</h3></div>
+              <label className="field-label" htmlFor="booking-date">{t.booking.date}</label>
+              <input className="field" id="booking-date" type="date" value={date} onChange={(event) => setDate(event.target.value)} min="2026-11-08" required />
+              <label className="field-label time-label">{t.booking.availableTimes}</label>
+              <div className="time-grid">{times.map((option) => <button key={option} type="button" className={time === option ? "time-slot picked" : "time-slot"} onClick={() => setTime(option)} aria-pressed={time === option}>{option}</button>)}</div>
+            </div>
+            <div className="booking-block">
+              <div className="block-title"><span>03</span><h3>{t.booking.yourDetails}</h3></div>
+              <label className="field-label" htmlFor="customer-name">{t.booking.fullName}</label>
+              <input className="field" id="customer-name" autoComplete="name" placeholder={t.booking.namePlaceholder} value={customer} onChange={(event) => setCustomer(event.target.value)} required />
+              <label className="field-label" htmlFor="customer-email">{t.booking.emailAddress}</label>
+              <input className="field" id="customer-email" type="email" autoComplete="email" placeholder={t.booking.emailPlaceholder} value={email} onChange={(event) => setEmail(event.target.value)} required />
+            </div>
+          </div>
+          <aside className="booking-summary">
+            <div className="eyebrow">{t.booking.summaryEyebrow}</div><h3>{t.booking.summaryTitle}<br />{t.booking.summaryTitleEnding}</h3>
+            <div className="summary-line"><span>{t.booking.service}</span><b>{selectedCopy.name}</b></div>
+            <div className="summary-line"><span>{t.booking.duration}</span><b>{selectedCopy.duration}</b></div>
+            <div className="summary-line"><span>{t.booking.date}</span><b>{formatDate(date, language)}</b></div>
+            <div className="summary-line"><span>{t.booking.time}</span><b>{time}</b></div>
+            <div className="summary-total"><span>{t.booking.total}</span><strong>{formatPrice(selected.price, language)}</strong></div>
+            {formError && <p className="form-error" role="alert">{formError}</p>}
+            <button className="primary full" type="submit">{t.booking.confirmBooking}<span>→</span></button>
+            <small className="secure-note">✦ {t.booking.demoNote}</small>
+          </aside>
+        </form>}
+      </section>}
 
-      {view === "dashboard" && <section className="dashboard section"><div className="dash-top"><div><div className="eyebrow">STUDIO FORM · BUSINESS PORTAL</div><h1>Your day, <em>in view.</em></h1><p className="muted">A calm overview of what's happening at your business.</p></div><button className="primary" onClick={() => setView("home")}>View customer site ↗</button></div><div className="dash-stats"><div><span>Today's appointments</span><b>{bookings.filter(b=>b.date==="Today" || b.date==="Nov 10").length}<small>+2 this week</small></b></div><div><span>Expected revenue</span><b>€286<small>Across 8 bookings</small></b></div><div><span>New customers</span><b>12<small>This month</small></b></div><div><span>Completion rate</span><b>96%<small>Great work</small></b></div></div><div className="dash-content"><div className="appointments-panel"><div className="panel-head"><div><h2>Appointments</h2><p>Your latest bookings</p></div><span className="today-tag">● LIVE DEMO</span></div><div className="appointment-table"><div className="table-head"><span>CLIENT</span><span>SERVICE</span><span>TIME</span><span>STATUS</span></div>{bookings.map(b=><div className="table-row" key={b.id}><div className="client-cell"><i>{b.customer.split(" ").map(n=>n[0]).join("").slice(0,2)}</i><b>{b.customer}</b></div><span>{b.service}</span><span>{b.time}</span><span><em className={b.status==="Confirmed"?"status confirmed-status":"status pending-status"}>{b.status}</em></span></div>)}</div></div><aside className="quick-panel"><div className="eyebrow">QUICK ACTIONS</div><h3>Keep things<br />moving.</h3><button onClick={() => startBooking(services[0])}>＋ Create a test booking <span>→</span></button><button onClick={() => setView("home")}>↗ Preview customer page <span>→</span></button><div className="tip-box"><span>✦</span><p><b>Good to know</b><br />This dashboard uses sample data. Connect Supabase to enable real accounts and synced appointments.</p></div></aside></div></section>}
+      {view === "dashboard" && <section className="dashboard section">
+        <div className="dash-top">
+          <div><div className="eyebrow">{t.dashboard.eyebrow}</div><h1>{t.dashboard.title}<br /><em>{t.dashboard.titleEmphasis}</em></h1><p className="muted">{t.dashboard.description}</p></div>
+          <button className="primary" onClick={() => navigate("home")}>{t.dashboard.customerSite} ↗</button>
+        </div>
+        <div className="dash-stats">
+          <div><span>{t.dashboard.todayAppointments}</span><b>{bookings.filter((booking) => booking.date === "today" || booking.date === date).length}<small>{t.dashboard.appointmentsThisWeek}</small></b></div>
+          <div><span>{t.dashboard.expectedRevenue}</span><b>{formatPrice(286, language)}<small>{t.dashboard.acrossBookings}</small></b></div>
+          <div><span>{t.dashboard.newCustomers}</span><b>12<small>{t.dashboard.thisMonth}</small></b></div>
+          <div><span>{t.dashboard.completionRate}</span><b>96%<small>{t.dashboard.greatWork}</small></b></div>
+        </div>
+        <div className="dash-content">
+          <div className="appointments-panel">
+            <div className="panel-head"><div><h2>{t.dashboard.appointments}</h2><p>{t.dashboard.latestBookings}</p></div><span className="today-tag">● {t.dashboard.liveDemo}</span></div>
+            <div className="appointment-table">
+              <div className="table-head"><span>{t.dashboard.client}</span><span>{t.dashboard.service}</span><span>{t.dashboard.time}</span><span>{t.dashboard.status}</span></div>
+              {bookings.map((booking) => <div className="table-row" key={booking.id}>
+                <div className="client-cell"><i>{booking.customer.split(" ").map((name) => name[0]).join("").slice(0, 2)}</i><b>{booking.customer}</b></div>
+                <span>{t.services[booking.serviceId - 1].name}</span><span>{booking.time}</span>
+                <span><em className={booking.status === "confirmed" ? "status confirmed-status" : "status pending-status"}>{t.booking[booking.status]}</em></span>
+              </div>)}
+            </div>
+          </div>
+          <aside className="quick-panel">
+            <div className="eyebrow">{t.dashboard.quickActions}</div><h3>{t.dashboard.keepMoving}</h3>
+            <button onClick={() => startBooking(services[0])}>＋ {t.dashboard.createBooking}<span>→</span></button>
+            <button onClick={() => navigate("home")}>↗ {t.dashboard.previewCustomerPage}<span>→</span></button>
+            <div className="tip-box"><span>✦</span><p><b>{t.dashboard.goodToKnow}</b><br />{t.dashboard.demoTip}</p></div>
+          </aside>
+        </div>
+      </section>}
 
-      <footer className="footer"><button className="brand footer-brand" onClick={() => setView("home")}><span className="brand-mark">r</span><span>re<span className="brand-blue">servo</span></span></button><span>Make room for what matters.</span><span>© 2026 Reservo</span></footer>
+      <footer className="footer">
+        <button className="brand footer-brand" onClick={() => navigate("home")}><span className="brand-mark">r</span><span>re<span className="brand-blue">servo</span></span></button>
+        <span>{t.footer.tagline}</span><span>© 2026 Reservo</span>
+      </footer>
     </main>
   );
 }

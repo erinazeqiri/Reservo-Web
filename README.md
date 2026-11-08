@@ -5,6 +5,7 @@ A responsive booking platform concept for local service businesses and their cus
 ## What's included
 
 - Premium, responsive landing page and service discovery.
+- Complete Albanian and English interface, with Albanian as the default and language choice saved in the browser.
 - Category filters and service search.
 - Customer booking flow with date/time selection and confirmation.
 - Business dashboard with sample appointments and overview metrics.
@@ -21,6 +22,8 @@ npm run dev
 ```
 
 Open http://localhost:3000.
+
+Use the **AL / EN** switcher in the navigation to change languages. The selection applies immediately across discovery, booking, confirmation, and the business dashboard, and is remembered when you return or reload the page.
 
 To create a production build:
 
